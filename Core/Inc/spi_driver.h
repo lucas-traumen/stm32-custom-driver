@@ -123,6 +123,7 @@ void SPI_DeInit(SPI_TypeDef *pSPIx);
 void SPI_SendData(SPI_TypeDef *pSPIx,uint8_t *pTxbuffer, uint8_t len);
 void SPI_ReceiveData(SPI_TypeDef *pSPIx,uint8_t *pRxbuffer, uint8_t len);
 void SPI_SSI_Config(SPI_TypeDef *pSPIx,uint8_t EnorDi);
+void SPI_SSOE_Config(SPI_TypeDef *pSPIx,uint8_t EnorDi);
 void SPI_PeripheralControl(SPI_TypeDef *pSPIx,uint8_t EnorDi);
 void SPI_GpioConfig(SPI_TypeDef *pSPIx);
 

@@ -106,6 +106,15 @@ void SPI_SSI_Config(SPI_TypeDef *pSPIx,uint8_t EnorDi)
         pSPIx->CR1 &= ~(SPI_CR1_SSI);
     }  
 }
+void SPI_SSOE_Config(SPI_TypeDef *pSPIx,uint8_t EnorDi)
+{
+     if(EnorDi==ENABLE)
+    {
+       pSPIx->CR1 |= SPI_CR2_SSOE;
+    }else{
+        pSPIx->CR1 &= ~(SPI_CR2_SSOE);
+    }  
+}
 void SPI_SendData(SPI_TypeDef *pSPIx,uint8_t *pTxbuffer, uint8_t len)
 {
     while(len>0)
@@ -115,18 +124,53 @@ void SPI_SendData(SPI_TypeDef *pSPIx,uint8_t *pTxbuffer, uint8_t len)
         {
             pSPIx->DR=*(uint16_t*)pTxbuffer;
             len -=2;
-            (uint16_t*)pTxbuffer++;
+            pTxbuffer+=2;
         }else
         {
             pSPIx->DR= *pTxbuffer;
             len--;
             pTxbuffer++;
         }
+        // Read dummy data
+        uint32_t temp = pSPIx->DR; 
+        temp = pSPIx->SR; // Đọc SR là một cách để xóa cờ lỗi Overrun trên một số dòng chip
+        (void)temp;
     }
     while(SPI_GetFlagStatus(pSPIx, FLAG_SPI_SR_BSY)== FLAG_SET);
-    uint32_t temp = pSPIx->DR; 
-    temp = pSPIx->SR; // Đọc SR là một cách để xóa cờ lỗi Overrun trên một số dòng chip
-    (void)temp;
+
+}
+void SPI_ReceiveData(SPI_TypeDef *pSPIx,uint8_t *pRxbuffer, uint8_t len)
+{
+    while(len>0)
+    {
+        
+        while(SPI_GetFlagStatus(pSPIx,FLAG_SPI_SR_TXE)==FLAG_RESET);
+        // 1.2 Gửi 0xFF (hoặc 0x00) để kích hoạt Clock
+        // Lưu ý: Gửi 8-bit hay 16-bit phụ thuộc cấu hình, nhưng dummy thường chỉ cần 8bit 
+        // nếu cấu hình DataSize là 8bit.
+        if((pSPIx->CR1 >> SPI_CR1_DFF_Pos) & 1) // 16-bit mode
+        {
+             pSPIx->DR = 0xFFFF;
+        }
+        else // 8-bit mode
+        {
+             pSPIx->DR = 0xFF; 
+        }
+        while(SPI_GetFlagStatus(pSPIx, FLAG_SPI_SR_RXNE) == FLAG_RESET);
+
+        if((pSPIx->CR1 >> SPI_CR1_DFF_Pos)&1)
+        {
+            pSPIx->DR=*(uint16_t*)pRxbuffer;
+            len -=2;
+            pRxbuffer+=2;
+        }else
+        {
+            pSPIx->DR= *pRxbuffer;
+            len--;
+            pRxbuffer++;
+        }
+    }
+    while(SPI_GetFlagStatus(pSPIx, FLAG_SPI_SR_BSY)== FLAG_SET);
 }
 void SPI_GpioConfig(SPI_TypeDef *pSPIx)
 {
