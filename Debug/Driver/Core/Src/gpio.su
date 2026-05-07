@@ -1,8 +1,0 @@
-../Driver/Core/Src/gpio.c:5:6:GPIO_PeriClockControl	16	static
-../Driver/Core/Src/gpio.c:70:6:GPIO_Init	32	static
-../Driver/Core/Src/gpio.c:149:6:GPIO_DeInit	16	static
-../Driver/Core/Src/gpio.c:180:6:GPIO_Write_Pin	16	static
-../Driver/Core/Src/gpio.c:191:6:GPIO_Write_Port	16	static
-../Driver/Core/Src/gpio.c:196:6:GPIO_Toggle_Pin	16	static
-../Driver/Core/Src/gpio.c:200:9:GPIO_Read_Pin	16	static
-../Driver/Core/Src/gpio.c:204:10:GPIO_Read_Port	16	static

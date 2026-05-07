@@ -1,8 +1,0 @@
-../Src/main.c:70:6:EnableFPU	4	static
-../Src/main.c:123:6:UART_init	24	static
-../Src/main.c:146:6:UartSend1Byte	24	static
-../Src/main.c:161:6:UartSendString	24	static
-../Src/main.c:172:6:USART1_IRQHandler	16	static
-../Src/main.c:188:6:print	176	static
-../Src/main.c:209:6:serial_plot_signals	176	static
-../Src/main.c:231:5:main	16	static

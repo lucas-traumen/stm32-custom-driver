@@ -1,7 +1,0 @@
-../DSP/Day1/signals.c:94:6:pesudo_delay	3
-../DSP/Day1/signals.c:103:6:plot_input_signal	2
-../DSP/Day1/signals.c:112:27:serial_plot_signals	1
-../DSP/Day1/signals.c:116:6:mean_signals	2
-../DSP/Day1/signals.c:125:6:variance_sample_signals	2
-../DSP/Day1/signals.c:137:6:standard_deviation_sample_signals	1
-../DSP/Day1/signals.c:143:6:convolution_signals	3
