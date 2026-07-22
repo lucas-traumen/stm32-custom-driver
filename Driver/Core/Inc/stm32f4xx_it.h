@@ -1,7 +1,8 @@
 #ifndef _STM32F4XX_IT_H_
 #define _STM32F4XX_IT_H_
 
-#include "system.h"
+#include "stm32f407xx.h"
+#include "stm32f4xx_common.h"
 
 void NMI_Handler(void);
 void HardFault_Handler(void);

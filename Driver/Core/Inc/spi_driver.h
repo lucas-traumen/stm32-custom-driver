@@ -1,8 +1,9 @@
 #ifndef _SPI_DRIVER_H_
 #define _SPI_DRIVER_H_
 
-#include "system.h"
-#include "gpio.h"
+#include "stm32f407xx.h"
+#include "stm32f4xx_common.h"
+#include "gpio_driver.h"
 /*
     @SPI_DeviceMode Config
 */

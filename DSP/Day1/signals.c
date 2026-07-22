@@ -150,11 +150,31 @@ void convolution_signals(float32_t *pSrc, float32_t *impulse_respond,float32_t *
 		for(uint32_t j=0;j<imRes_len;j++)
 		{
 			sum = sum + (impulse_respond[j]*pSrc[i-j]);
-			serial_plot_signals("$%.2f %.2f;",sum,impulse_respond[j]);
-			pesudo_delay(100);
+//			serial_plot_signals("$%.2f %.2f;",sum,impulse_respond[j]);
+//			pesudo_delay(100);
 		}
 		pRes[i]=sum;
 
 	}
 }
-
+void running_sum(float32_t *pSrc,uint32_t Src_len,float32_t *pRes)
+{
+	int i;
+	if(Src_len==0) return;
+	pRes[0]=pSrc[0];
+	for(i=1;i<Src_len;i++)
+	{
+		pRes[i] =pRes[i-1]+pSrc[i];
+	}
+}
+void running_sum_average(float32_t *pSrc,uint32_t Src_len,float32_t *pRes)
+{
+	int i;
+	if(Src_len==0) return;
+	float32_t sum=0.0f;
+	for(i=1;i<Src_len;i++)
+	{
+		sum+=pSrc[i];
+		pRes[i] =sum/(float32_t)(i+1);
+	}
+}
