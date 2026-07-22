@@ -1,77 +1,118 @@
 #include "exti.h"
 
-
-void NVIC_ICSR(IRQn_Type IRQnumber, uint8_t EnorDi) // 0-255 
+void EXTI_Init(EXTI_Handle_t *pEXTIHandle)
 {
-    uint8_t temp1=(uint8_t)IRQnumber/32;
-    uint8_t temp2=(uint8_t)IRQnumber%32;
-    if(EnorDi == ENABLE)
-    {
-        NVIC->ISER[temp1] |=(1<<temp2);
-    }else{
-         NVIC->ICER[temp1] |=(1<<temp2);
+    uint8_t line = pEXTIHandle->EXTI_Config.EXTI_Line;
+
+    if(pEXTIHandle->EXTI_Config.EXTI_Mode == EXTI_MODE_INTERRUPT) {
+        EXTI->IMR |= (1 << line);
+        EXTI->EMR &= ~(1 << line);
+    } else {
+        EXTI->EMR |= (1 << line);
+        EXTI->IMR &= ~(1 << line);
     }
-}
-void Driver_NVIC_SetPriorityGrouping()
-{
-    uint32_t val = 0;
-    val = SCB->AIRCR; 
-    val &= ~((0xFFFF0000) | (7 << 8)); 
-    val |= (0x5FA << 16) | (5 << 8);
-    
-    SCB->AIRCR = val;
-}
-static uint8_t  Driver_NVIC_GetPriorityGrouping()
-{
-    // Đọc bit [10:8] của thanh ghi AIRCR
-    // 0x700 là mặt nạ lấy 3 bit đó (Binary: 111 0000 0000)
-    // Dịch phải 8 để lấy giá trị thực (3, 4, 5, 6, 7)
-    return ((SCB->AIRCR & 0x700) >> 8);
-}
-static void SetPriority(IRQn_Type IRQn, uint8_t encoded_priority)
-{
-    NVIC->IP[(uint8_t)IRQn] =(encoded_priority<<4);
-}
-void  Driver_NVIC_SetPriority(IRQn_Type IRQn, uint8_t PreemptPriority, uint8_t SubPriority)
-{
-    uint8_t prioritygroup = 0;
-    uint8_t encoded_priority = 0;
-    uint8_t sub_priority_shift = 0;
 
-    prioritygroup =  Driver_NVIC_GetPriorityGrouping();
-
-    // 2. Tính toán số bit cần dịch dựa trên Group
-    // Công thức thực nghiệm cho STM32F4 (4 bit priority):
-    // Group 3 (4 Pre, 0 Sub) -> Shift = 0
-    // Group 4 (3 Pre, 1 Sub) -> Shift = 1
-    // Group 5 (2 Pre, 2 Sub) -> Shift = 2
-    // Group 6 (1 Pre, 3 Sub) -> Shift = 3
-    // Group 7 (0 Pre, 4 Sub) -> Shift = 4
-    
-    // => Công thức: Shift = Group - 3
-    sub_priority_shift = prioritygroup - 3;
-
-    // 3. Gộp 2 số lại thành 1 số (Encoded)
-    // Nguyên lý: Đẩy Preempt sang trái, nhét Sub vào bên phải
-    encoded_priority = (PreemptPriority << sub_priority_shift) | (SubPriority & (0x0F >> (4 - sub_priority_shift)));
-    SetPriority(IRQn, encoded_priority);
-}
-void EXTI0_IRQHandling()
-{
-    if((EXTI->PR>>GPIO_PIN_NO_0)&1)
-    {
-        EXTI->PR |=(1<<GPIO_PIN_NO_0);
-       
-        EXTI0_IRQCallback(GPIO_PIN_NO_0);
-         
+    if(pEXTIHandle->EXTI_Config.EXTI_Trigger == EXTI_TRIGGER_RISING) {
+        EXTI->RTSR |= (1 << line);
+        EXTI->FTSR &= ~(1 << line);
+    } else if(pEXTIHandle->EXTI_Config.EXTI_Trigger == EXTI_TRIGGER_FALLING) {
+        EXTI->FTSR |= (1 << line);
+        EXTI->RTSR &= ~(1 << line);
+    } else if(pEXTIHandle->EXTI_Config.EXTI_Trigger == EXTI_TRIGGER_RISING_FALLING) {
+        EXTI->RTSR |= (1 << line);
+        EXTI->FTSR |= (1 << line);
     }
-}
-__weak void EXTI0_IRQCallback(uint8_t GPIO_PinNumber)
-{
-    if(GPIO_PinNumber == GPIO_PIN_NO_0)
-    {
-        
+
+    if(pEXTIHandle->EXTI_Config.EXTI_LineCmd == ENABLE) {
+        EXTI->IMR |= (1 << line);
+    } else {
+        EXTI->IMR &= ~(1 << line);
     }
 }
 
+void EXTI_DeInit(void)
+{
+    EXTI->IMR = 0x00000000;
+    EXTI->EMR = 0x00000000;
+    EXTI->RTSR = 0x00000000;
+    EXTI->FTSR = 0x00000000;
+    EXTI->PR = 0xFFFFFFFF;
+}
 
+void EXTI_IRQHandling(uint8_t EXTI_Line)
+{
+    if(EXTI->PR & (1 << EXTI_Line)) {
+        EXTI->PR |= (1 << EXTI_Line);
+
+        switch(EXTI_Line) {
+            case 0:
+                EXTI0_Callback();
+                break;
+            case 1:
+                EXTI1_Callback();
+                break;
+            case 2:
+                EXTI2_Callback();
+                break;
+            case 3:
+                EXTI3_Callback();
+                break;
+            case 4:
+                EXTI4_Callback();
+                break;
+            case 5:
+            case 6:
+            case 7:
+            case 8:
+            case 9:
+                EXTI9_5_Callback(EXTI_Line);
+                break;
+            case 10:
+            case 11:
+            case 12:
+            case 13:
+            case 14:
+            case 15:
+                EXTI15_10_Callback(EXTI_Line);
+                break;
+        }
+    }
+}
+
+void EXTI_ClearPendingBit(uint8_t EXTI_Line)
+{
+    EXTI->PR |= (1 << EXTI_Line);
+}
+
+uint8_t EXTI_GetPendingBit(uint8_t EXTI_Line)
+{
+    return ((EXTI->PR >> EXTI_Line) & 1);
+}
+
+__weak void EXTI0_Callback(void)
+{
+}
+
+__weak void EXTI1_Callback(void)
+{
+}
+
+__weak void EXTI2_Callback(void)
+{
+}
+
+__weak void EXTI3_Callback(void)
+{
+}
+
+__weak void EXTI4_Callback(void)
+{
+}
+
+__weak void EXTI9_5_Callback(uint8_t pin)
+{
+}
+
+__weak void EXTI15_10_Callback(uint8_t pin)
+{
+}

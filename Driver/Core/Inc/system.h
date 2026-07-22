@@ -8,13 +8,16 @@
 #include "spi_driver.h"
 #include "gpio.h"
 #include "rcc.h"
+#include "nvic.h"
+#include "exti.h"
+#include "stm32f4xx_it.h"
 
 
 
 
-#define __IM     volatile const  
+#define __IM     volatile const
 #define _vo volatile
-#define __IO volatile 
+#define __IO volatile
 #define __weak __attribute__((weak))
 
 
