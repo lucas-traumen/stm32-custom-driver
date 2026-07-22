@@ -5,7 +5,6 @@
 Custom bare-metal driver layer cho STM32F407VGTx, theo pattern OOP/HAL style.
 
 **Đặc điểm:**
-- Viết từ đầu (không dùng ST HAL)
 - OOP pattern: Handle struct + Config struct
 - Register-level programming
 - Tích hợp CMSIS-DSP
