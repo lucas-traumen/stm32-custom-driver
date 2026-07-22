@@ -92,15 +92,13 @@ SPI_SendData(SPI2, txbuf, len);            // Gửi data
 
 ## 4. Tiến độ Driver
 
-### Hoàn thành
-- ✅ **GPIO** - Digital I/O, EXTI → [gpio.md](gpio.md)
-- ✅ **SPI** - Master/Slave, 8/16-bit → [spi.md](spi.md)
-- ✅ **RCC** - Clock enable/disable macros → [rcc.md](rcc.md)
-- ✅ **EXTI/NVIC** - External interrupt → [exti_nvic.md](exti_nvic.md)
-
-### Đang làm
+### Đang phát triển (WIP)
+- ⚠️ **GPIO** - Init, Read/Write, Toggle, EXTI → [gpio.md](gpio.md)
+- ⚠️ **SPI** - Master/Slave, blocking TX/RX → [spi.md](spi.md)
+- ⚠️ **RCC** - Clock macros → [rcc.md](rcc.md)
+- ⚠️ **EXTI/NVIC** - Interrupt handling → [exti_nvic.md](exti_nvic.md)
 - ⚠️ **I2C** - Code skeleton (commented) → [i2c.md](i2c.md)
-- ⚠️ **Restructure** - Đổi naming, xóa circular dependency
+- ⚠️ **Restructure** - Đã xong naming, loại bỏ circular dependency
 
 ### Kế hoạch
 - **USART** - Hiện dùng direct register trong main.c
