@@ -1,10 +1,13 @@
-Debug/ 
-Release/ 
+Debug/
+Release/
 
-*.o, *.obj 
+*.o, *.obj
 
-*.elf, *.bin, *.hex 
+*.elf, *.bin, *.hex
 
-*.map, *.lst 
+*.map, *.lst
 
-*.d 
+*.d
+
+# Claude internal rules (không commit)
+.claude/

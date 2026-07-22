@@ -55,6 +55,7 @@
 //#include "stm32f407xx.h"
 #include "st7735.h"
 #include "signals.h"
+#include "ecg.h"
 #include "arm_math.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -67,6 +68,11 @@ uint32_t cnt=0;
 float32_t g_in_sig_sample=0.0f;
 float32_t g_in_convolution_signal=0.0f;
 float32_t convoulution_signals[_1kHz_15kHz_SIG_LEN+IMPULSE_RESPOND_LEN-1]={0.0f};
+float32_t running_sum_signals[ECG_SIGNAL_LEN]={0.0f};
+
+float32_t dft_real[DFT_BINS]={0.0f};
+float32_t dft_imag[DFT_BINS]={0.0f};
+float32_t dft_magnitude[DFT_BINS]={0.0f};
 void EnableFPU()
 {
 	SCB->CPACR |=(3UL<<22)|(3UL<<20);
@@ -74,6 +80,10 @@ void EnableFPU()
 float32_t _mean_result = 0.0f;
 float32_t _standard_deviation_result = 0.0f;
 float32_t _variance_result = 0.0f;
+uint32_t _val_start_measure=0u;
+uint32_t _val_end_measure=0u;
+float32_t _val_result_measure=0.0f;
+
 //void CMSIS_DSP_Test(void)
 //{
 //
@@ -208,30 +218,46 @@ void print(const char *fmt, ...)
 }
 void serial_plot_signals(const char *fmt, ...)
 {
+	va_list args;
+	char buf[5000];
+	int len;
 
-	    va_list args;
-	    char buf[160];
-	    va_start(args, fmt);
-	    int len;
-	       va_start(args, fmt);
-	       len = vsnprintf(buf, sizeof(buf), fmt, args);
-	       va_end(args);
+	va_start(args, fmt);
+	len = vsnprintf(buf, sizeof(buf), fmt, args);
+	va_end(args);
 
-	       if (len <= 0) {
-	           return;
-	       }
+	if (len <= 0) {
+		return;
+	}
 
-	       if (len > (int)sizeof(buf)) {
-	           len = (int)sizeof(buf);
-	       }
-	       UartSendString(buf);
+	if (len > (int)sizeof(buf)) {
+		len = (int)sizeof(buf);
+	}
+
+	UartSendString(buf);
 }
+
+void systick_init()
+{
+	// disablled SysTick
+	SysTick->CTRL=0;
+	//CLKSRC
+	SysTick->CTRL|=1<<2;
+	//reload value
+	SysTick->LOAD=0x00FFFFFF;
+	//
+	SysTick->VAL=0;
+	//
+	SysTick->CTRL|=1<<0;
+}
+
 volatile uint8_t flag=0;
 volatile uint8_t flag1=0;
 int main(void) {
 	// /* 1. Bật clock cho GPIOD */
 //	RCC->AHB1ENR |= (1 << 3);     // GPIODEN = bit 3
 	EnableFPU();
+	systick_init();
 	hgpiod.pGPIOx= GPIOD;
 	hgpiod.GPIO_PinConfig.GPIO_PinNumber= GPIO_PIN_NO_13;
 	hgpiod.GPIO_PinConfig.GPIO_PinMode= GPIO_MODE_OUT;
@@ -309,8 +335,25 @@ int main(void) {
 		//GPIO_Toggle_Pin(GPIOD,GPIO_PIN_NO_13);
 	//	delay_ms(500);
 		plot_input_signal();
-		convolution_signals(inputSignal_f32_1kHz_15kHz,impulse_response,convoulution_signals,_1kHz_15kHz_SIG_LEN,IMPULSE_RESPOND_LEN);
+		_val_start_measure=SysTick->VAL;
+		//convolution_signals(inputSignal_f32_1kHz_15kHz,impulse_response,convoulution_signals,_1kHz_15kHz_SIG_LEN,IMPULSE_RESPOND_LEN);
+		//arm_conv_f32(inputSignal_f32_1kHz_15kHz, _1kHz_15kHz_SIG_LEN, impulse_response,IMPULSE_RESPOND_LEN ,convoulution_signals );
 
+		//running_sum_average(ecg_signal,ECG_SIGNAL_LEN,running_sum_signals);
+		dft_real_one_sided_f32(
+			ecg_signal,
+		    DFT_N,
+		    dft_real,
+		    dft_imag,
+		    dft_magnitude,
+		    DFT_BINS
+		);
+		for ( int i=0;i<DFT_BINS;i++)
+			{
+				serial_plot_signals("$%.5f %.5f;",dft_magnitude[i],ecg_signal[i]);
+			}
+		_val_end_measure=SysTick->VAL;
+		_val_result_measure=1.0*(_val_start_measure-_val_end_measure)/16000000;
 		pesudo_delay(1000);
 
 	}
