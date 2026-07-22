@@ -1,5 +1,5 @@
 #include "stm32f4xx_it.h"
-#include "exti.h"
+#include "exti_driver.h"
 
 void NMI_Handler(void)
 {

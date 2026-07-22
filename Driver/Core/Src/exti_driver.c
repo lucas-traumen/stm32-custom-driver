@@ -1,4 +1,4 @@
-#include "exti.h"
+#include "exti_driver.h"
 
 void EXTI_Init(EXTI_Handle_t *pEXTIHandle)
 {

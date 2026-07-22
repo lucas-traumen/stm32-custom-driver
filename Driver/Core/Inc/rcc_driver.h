@@ -1,7 +1,8 @@
-#ifndef _RCC_H_
-#define _RCC_H_
+#ifndef _RCC_DRIVER_H_
+#define _RCC_DRIVER_H_
 
-#include "system.h"
+#include "stm32f407xx.h"
+#include "stm32f4xx_common.h"
 
 typedef enum {
     RCC_SYSCLK_HSI = 0,

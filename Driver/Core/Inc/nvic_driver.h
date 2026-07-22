@@ -1,7 +1,8 @@
-#ifndef _NVIC_H_
-#define _NVIC_H_
+#ifndef _NVIC_DRIVER_H_
+#define _NVIC_DRIVER_H_
 
-#include "system.h"
+#include "stm32f407xx.h"
+#include "stm32f4xx_common.h"
 
 #define NVIC_PRIORITY_GROUP_0   0x07
 #define NVIC_PRIORITY_GROUP_1   0x06

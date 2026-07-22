@@ -1,6 +1,6 @@
-#include "gpio.h"
-#include "rcc.h"
-#include "exti.h"
+#include "gpio_driver.h"
+#include "rcc_driver.h"
+#include "exti_driver.h"
 
 void GPIO_PeriClockControl(GPIO_TypeDef *pGPIOx, uint8_t EnorDi)
 {

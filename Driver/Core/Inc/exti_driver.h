@@ -1,7 +1,9 @@
-#ifndef _EXTI_H_
-#define _EXTI_H_
+#ifndef _EXTI_DRIVER_H_
+#define _EXTI_DRIVER_H_
 
-#include "system.h"
+#include "stm32f407xx.h"
+#include "stm32f4xx_common.h"
+#include "gpio_driver.h"
 
 typedef enum {
     EXTI_TRIGGER_RISING = 0,
