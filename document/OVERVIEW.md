@@ -1,92 +1,134 @@
-# STM32F407 Custom Driver - Progress Dashboard
+# STM32F407 Custom Driver - Overview
 
-Custom bare-metal driver cho STM32F407VGTx theo OOP/HAL pattern.
+## 1. Hệ thống Driver
 
-**MCU:** STM32F407VGTx | **Board:** Discovery | **CPU:** Cortex-M4 + FPU
+Custom bare-metal driver library cho STM32F407VGTx.
 
----
+**Mục đích:**
+- Viết driver từ đầu (không dùng ST HAL)
+- Hiểu register programming
+- Pattern OOP: Handle + Config struct
 
-## Driver Progress
-
-### ✅ Completed Drivers
-
-| Driver | Features | Doc |
-|--------|----------|-----|
-| **GPIO** | Init, Read/Write, Toggle, EXTI | [gpio.md](gpio.md) |
-| **SPI** | Master/Slave, 8/16-bit, TX/RX | [spi.md](spi.md) |
-| **RCC** | Clock enable/disable macros | [rcc.md](rcc.md) |
-| **EXTI** | External interrupt, callback | [exti_nvic.md](exti_nvic.md) |
-| **NVIC** | Priority, IRQ control | [exti_nvic.md](exti_nvic.md) |
-
-### ⚠️ Work In Progress
-
-| Driver | Status |
-|--------|--------|
-| **I2C** | Skeleton code (commented) |
-
-### ⏳ Planned
-
-- **USART** - High priority (hiện dùng direct register)
-- **Timer/PWM** - Medium priority
-- **ADC** - Medium priority
-- **DMA** - Low priority (complex)
+**Target:** STM32F407 Discovery | Cortex-M4 + FPU | HSI 16MHz
 
 ---
 
-## Architecture
+## 2. Kiến trúc Layer
 
 ```
-Application (main.c)
-    ↓
-Driver Layer (OOP pattern)
-├─ gpio_driver.h/.c     Handle + Config struct
-├─ spi_driver.h/.c      Init → Config → Enable
-├─ rcc_driver.h/.c
-├─ exti_driver.h/.c
-└─ nvic_driver.h/.c
-    ↓
+Application Code (main.c)
+    ↓ include
+stm32f4xx_drivers.h (umbrella - optional)
+    ↓ include all
+┌───────────────────────────────┐
+│   Driver Layer (độc lập)      │
+├─ gpio_driver.h/.c             │
+├─ spi_driver.h/.c              │
+├─ rcc_driver.h/.c              │
+├─ exti_driver.h/.c             │
+└─ nvic_driver.h/.c             │
+└───────────────────────────────┘
+    ↓ include
 ┌────────────────┬──────────────────┐
-stm32f407xx.h    stm32f4xx_common.h
-(CMSIS)          (ENABLE/DISABLE...)
+│stm32f407xx.h   │stm32f4xx_common.h│
+│(CMSIS)         │(ENABLE/DISABLE)  │
+└────────────────┴──────────────────┘
+```
+
+**Nguyên tắc:**
+- Mỗi driver độc lập (không include nhau)
+- Chỉ include: stm32f407xx.h + stm32f4xx_common.h
+- Source file (.c) mới include cross-driver nếu cần
+
+---
+
+## 3. Cách sử dụng Driver
+
+### Pattern chuẩn (mọi peripheral)
+
+**Bước 1: Khai báo handle**
+```c
+GPIO_Handle_t hgpio;        // Handle = base addr + config
+```
+
+**Bước 2: Cấu hình**
+```c
+hgpio.pGPIOx = GPIOD;                              // Chọn port
+hgpio.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_13;
+hgpio.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_OUT;
+hgpio.GPIO_PinConfig.GPIO_PinOPType = GPIO_OP_TYPE_PP;
+hgpio.GPIO_PinConfig.GPIO_PinSpeed = GPIO_SPEED_HIGH;
+```
+
+**Bước 3: Init (tự bật clock bên trong)**
+```c
+GPIO_Init(&hgpio);
+```
+
+**Bước 4: Sử dụng**
+```c
+GPIO_Write_Pin(&hgpio, GPIO_PIN_NO_13, SET);
+GPIO_Toggle_Pin(&hgpio, GPIO_PIN_NO_13);
+```
+
+### Ví dụ SPI
+
+```c
+SPI_Handle_t hspi2;
+hspi2.pSPIx = SPI2;
+hspi2.SPIConfig.SPI_DeviceMode = SPI_DEVICE_MODE_MASTER;
+hspi2.SPIConfig.SPI_BusConfig = SPI_BUS_CONFIG_FD;
+hspi2.SPIConfig.SPI_DFF = SPI_DFF_8bits;
+// ... config khác
+
+SPI_Init(&hspi2);                          // Init + bật clock
+SPI_SSI_Config(SPI2, ENABLE);              // Set SSI nếu SSM=1
+SPI_PeripheralControl(SPI2, ENABLE);       // Bật SPE
+
+SPI_SendData(SPI2, txbuf, len);            // Gửi data
 ```
 
 ---
 
-## Current Issues
+## 4. Tiến độ Driver
 
-| Issue | Impact | Next |
-|-------|--------|------|
-| Circular dependency | Rebuild toàn bộ khi sửa 1 driver | Phase 2-6 |
-| Naming inconsistent | `gpio.h` vs `spi_driver.h` | Rename phase |
-| No common header | Duplicate defs | Create common.h |
+### Hoàn thành
+- ✅ **GPIO** - Digital I/O, EXTI → [gpio.md](gpio.md)
+- ✅ **SPI** - Master/Slave, 8/16-bit → [spi.md](spi.md)
+- ✅ **RCC** - Clock enable/disable macros → [rcc.md](rcc.md)
+- ✅ **EXTI/NVIC** - External interrupt → [exti_nvic.md](exti_nvic.md)
+
+### Đang làm
+- ⚠️ **I2C** - Code skeleton (commented) → [i2c.md](i2c.md)
+- ⚠️ **Restructure** - Đổi naming, xóa circular dependency
+
+### Kế hoạch
+- **USART** - Hiện dùng direct register trong main.c
+- **Timer/PWM**
+- **ADC**
+- **DMA**
 
 ---
 
-## Build
+## 5. Build Project
 
 ```bash
-make -C Debug        # Build
-make -C Debug clean  # Clean
+make -C Debug              # Build
+make -C Debug clean        # Clean
 ```
 
-**Clock:** HSI 16MHz (PLL config commented out)
+**Toolchain:** GNU ARM (arm-none-eabi-gcc)  
+**IDE:** STM32CubeIDE managed makefile
 
 ---
 
-## Restructure Status
+## 6. Tài liệu chi tiết
 
-**Phase 1: Cleanup** ✅ Done
-- Xóa: led.h, SYSCFG.h, init.c, rcc.c
+Mỗi driver có file `.md` riêng:
+- [GPIO](gpio.md) - Cấu trúc, API, debug tips
+- [SPI](spi.md) - Config, SSM/SSI, pin mapping
+- [I2C](i2c.md) - WIP
+- [RCC](rcc.md) - Clock macros
+- [EXTI/NVIC](exti_nvic.md) - Interrupt handling
 
-**Phase 2-6:** ⏳ Next session (~30k token)
-- Create stm32f4xx_common.h
-- Rename files → consistent naming
-- Remove system.h hub
-- Independent headers
-
----
-
-## Quick Links
-
-- [GPIO](gpio.md) | [SPI](spi.md) | [I2C](i2c.md) | [RCC](rcc.md) | [EXTI/NVIC](exti_nvic.md)
-- [README](README.md) - Peripheral doc index
+**Format:** Struct → Init sequence → API → Notes → Debug
