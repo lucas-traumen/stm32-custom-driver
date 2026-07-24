@@ -4,12 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build commands
 
-This is an STM32CubeIDE managed makefile project for `STM32F407VGTx`. The generated Debug build files live under `Debug/`.
-
-```bash
-make -C Debug
-make -C Debug clean
-```
+At present, I'm using cubeide debug,constraint be built and debug
 
 The Debug build produces `Driver_stm32_f4.elf`, `Driver_stm32_f4.hex`, `Driver_stm32_f4.map`, and `Driver_stm32_f4.list` from the generated makefile. The project expects the STM32 GNU ARM toolchain commands such as `arm-none-eabi-gcc`, `arm-none-eabi-size`, `arm-none-eabi-objdump`, and `arm-none-eabi-objcopy` to be available.
 
@@ -43,16 +38,15 @@ Important Debug configuration details observed in the project metadata:
 
 This project is a bare-metal STM32F407 Discovery learning project based on a Udemy course. Keep the custom driver style close to HAL/OOP patterns: use handle structs, config structs, and clear peripheral APIs rather than unrelated abstractions.
 
-When changing a topic or module, maintain topic documentation under `document/`. For example, SPI work should update or create a markdown file explaining SPI concepts, register flow, and how the project code uses it.
+When adding or rewriting functions, add concise function documentation in code that explains purpose, parameters, return value when applicable, and any hardware/register assumptions that are not obvious from the function name (Doxygen standard, coding convention).
 
-When adding or rewriting functions, add concise function documentation in code that explains purpose, parameters, return value when applicable, and any hardware/register assumptions that are not obvious from the function name.
-
-The assistant's role in this repository is to fix code and guide the user through rewriting the drivers and DSP examples, not only to provide final code.
+Detailed role, per-peripheral documentation rule, and session workflow live in `.claude/workflow.md` (see below) — do not duplicate them here.
 
 ## Internal rules (local only)
 
 If `.claude/` folder exists in the repo, it contains detailed workflow/token rules not committed to git:
-- `.claude/workflow.md` — session strategy, code style, driver patterns
+- `.claude/OVERVIEW.md` — index of the files below, plus implementation memory
+- `.claude/workflow.md` — session strategy, code style, driver patterns, assistant role, doc format
 - `.claude/token-rules.md` — token budget, reading strategy
 - `.claude/session-template.md` — template for starting each session
 
