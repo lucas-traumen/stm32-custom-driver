@@ -51,9 +51,10 @@
 //
 //}
 	//#include "stm32f407xx.h"
-#include "stm32f4xx_drivers.h"
+//#include "stm32f4xx_drivers.h"
 //#include "stm32f407xx.h"
-#include "st7735.h"
+//#include "st7735.h"
+#include "stm32f4xx_drivers.h"
 #include "signals.h"
 #include "ecg.h"
 #include "arm_math.h"
@@ -73,6 +74,7 @@ float32_t running_sum_signals[ECG_SIGNAL_LEN]={0.0f};
 float32_t dft_real[DFT_BINS]={0.0f};
 float32_t dft_imag[DFT_BINS]={0.0f};
 float32_t dft_magnitude[DFT_BINS]={0.0f};
+
 void EnableFPU()
 {
 	SCB->CPACR |=(3UL<<22)|(3UL<<20);
@@ -256,26 +258,26 @@ volatile uint8_t flag1=0;
 int main(void) {
 	// /* 1. Bật clock cho GPIOD */
 //	RCC->AHB1ENR |= (1 << 3);     // GPIODEN = bit 3
-	EnableFPU();
-	systick_init();
-	hgpiod.pGPIOx= GPIOD;
-	hgpiod.GPIO_PinConfig.GPIO_PinNumber= GPIO_PIN_NO_13;
-	hgpiod.GPIO_PinConfig.GPIO_PinMode= GPIO_MODE_OUT;
-	hgpiod.GPIO_PinConfig.GPIO_PinOPType= GPIO_OP_TYPE_PP;
-	hgpiod.GPIO_PinConfig.GPIO_PinPuPdControl= GPIO_NO_PUPD;
-	hgpiod.GPIO_PinConfig.GPIO_PinSpeed= GPIO_SPEED_HIGH;
-	GPIO_Init(&hgpiod);
-	hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_12;
-	GPIO_Init(&hgpiod);
+//	EnableFPU();
+//	systick_init();
+//	hgpiod.pGPIOx= GPIOD;
+//	hgpiod.GPIO_PinConfig.GPIO_PinNumber= GPIO_PIN_NO_13;
+//	hgpiod.GPIO_PinConfig.GPIO_PinMode= GPIO_MODE_OUT;
+//	hgpiod.GPIO_PinConfig.GPIO_PinOPType= GPIO_OP_TYPE_PP;
+//	hgpiod.GPIO_PinConfig.GPIO_PinPuPdControl= GPIO_NO_PUPD;
+//	hgpiod.GPIO_PinConfig.GPIO_PinSpeed= GPIO_SPEED_HIGH;
+//	GPIO_Init(&hgpiod);
+//	hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_12;
+//	GPIO_Init(&hgpiod);
 
 //	hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_13;
 //	GPIO_Init(&hgpiod);
 
-	hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_14;
-	GPIO_Init(&hgpiod);
-
-	 hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_15;
-	 GPIO_Init(&hgpiod);
+//	hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_14;
+//	GPIO_Init(&hgpiod);
+//
+//	 hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_15;
+//	 GPIO_Init(&hgpiod);
 
 //	 hgpiob.pGPIOx= GPIOB;
 //	 	hgpiob.GPIO_PinConfig.GPIO_PinNumber= GPIO_PIN_NO_10;
@@ -314,47 +316,52 @@ int main(void) {
 //	ST7735_Backlight_Off();
 //	ST7735_Backlight_On();
 //	ST7735_DrawPixel(20, 40, ST7735_RED);
-
-	hgpiob.pGPIOx=GPIOB;
-	hgpiob.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_ALTFN;       // Chế độ là Alternate Function
-	hgpiob.GPIO_PinConfig.GPIO_PinAltFunMode = AF7;
-	hgpiob.GPIO_PinConfig.GPIO_PinOPType=GPIO_OP_TYPE_PP;
-	hgpiob.GPIO_PinConfig.GPIO_PinPuPdControl=GPIO_PIN_PU;
-	hgpiob.GPIO_PinConfig.GPIO_PinNumber=GPIO_PIN_NO_6;
-	GPIO_Init(&hgpiob);
-	hgpiob.GPIO_PinConfig.GPIO_PinNumber=GPIO_PIN_NO_7;
-	GPIO_Init(&hgpiob);
-	UART_init();
+//
+//	hgpiob.pGPIOx=GPIOB;
+//	hgpiob.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_ALTFN;       // Chế độ là Alternate Function
+//	hgpiob.GPIO_PinConfig.GPIO_PinAltFunMode = AF7;
+//	hgpiob.GPIO_PinConfig.GPIO_PinOPType=GPIO_OP_TYPE_PP;
+//	hgpiob.GPIO_PinConfig.GPIO_PinPuPdControl=GPIO_PIN_PU;
+//	hgpiob.GPIO_PinConfig.GPIO_PinNumber=GPIO_PIN_NO_6;
+//	GPIO_Init(&hgpiob);
+//	hgpiob.GPIO_PinConfig.GPIO_PinNumber=GPIO_PIN_NO_7;
+//	GPIO_Init(&hgpiob);
+//	UART_init();
 	//CMSIS_DSP_Test();
-	mean_signals(_5hz_signal, (uint32_t)HZ_5_SIG_LEN,&_mean_result);
-	variance_sample_signals(_5hz_signal,(uint32_t)HZ_5_SIG_LEN,&_variance_result);
-	standard_deviation_sample_signals(_5hz_signal,(uint32_t)HZ_5_SIG_LEN,&_standard_deviation_result);
+//	mean_signals(_5hz_signal, (uint32_t)HZ_5_SIG_LEN,&_mean_result);
+//	variance_sample_signals(_5hz_signal,(uint32_t)HZ_5_SIG_LEN,&_variance_result);
+//	standard_deviation_sample_signals(_5hz_signal,(uint32_t)HZ_5_SIG_LEN,&_standard_deviation_result);
 
+
+
+	SystemClock_Config();
+	MX_GPIO_Init();
+	MX_MCO2_Init();
 	while (1) {
 		//ST7735_FillScreen(ST7735_RED);
 		//GPIO_Toggle_Pin(GPIOD,GPIO_PIN_NO_13);
 	//	delay_ms(500);
-		plot_input_signal();
-		_val_start_measure=SysTick->VAL;
+//		plot_input_signal();
+//		_val_start_measure=SysTick->VAL;
 		//convolution_signals(inputSignal_f32_1kHz_15kHz,impulse_response,convoulution_signals,_1kHz_15kHz_SIG_LEN,IMPULSE_RESPOND_LEN);
 		//arm_conv_f32(inputSignal_f32_1kHz_15kHz, _1kHz_15kHz_SIG_LEN, impulse_response,IMPULSE_RESPOND_LEN ,convoulution_signals );
 
 		//running_sum_average(ecg_signal,ECG_SIGNAL_LEN,running_sum_signals);
-		dft_real_one_sided_f32(
-			ecg_signal,
-		    DFT_N,
-		    dft_real,
-		    dft_imag,
-		    dft_magnitude,
-		    DFT_BINS
-		);
-		for ( int i=0;i<DFT_BINS;i++)
-			{
-				serial_plot_signals("$%.5f %.5f;",dft_magnitude[i],ecg_signal[i]);
-			}
-		_val_end_measure=SysTick->VAL;
-		_val_result_measure=1.0*(_val_start_measure-_val_end_measure)/16000000;
-		pesudo_delay(1000);
+//		dft_real_one_sided_f32(
+//			ecg_signal,
+//		    DFT_N,
+//		    dft_real,
+//		    dft_imag,
+//		    dft_magnitude,
+//		    DFT_BINS
+//		);
+//		for ( int i=0;i<DFT_BINS;i++)
+//			{
+//				serial_plot_signals("$%.5f %.5f;",dft_magnitude[i],ecg_signal[i]);
+//			}
+//		_val_end_measure=SysTick->VAL;
+//		_val_result_measure=1.0*(_val_start_measure-_val_end_measure)/16000000;
+//		pesudo_delay(1000);
 
 	}
 

@@ -14,7 +14,7 @@ void NVIC_EnableIRQ(IRQn_Type IRQn);
 void NVIC_DisableIRQ(IRQn_Type IRQn);
 void NVIC_SetPriorityGrouping(uint32_t PriorityGroup);
 uint32_t NVIC_GetPriorityGrouping(void);
-void NVIC_SetPriority(IRQn_Type IRQn, uint8_t PreemptPriority, uint8_t SubPriority);
+//void NVIC_SetPriority(IRQn_Type IRQn, uint8_t PreemptPriority, uint8_t SubPriority);
 void NVIC_ClearPendingIRQ(IRQn_Type IRQn);
 uint32_t NVIC_GetPendingIRQ(IRQn_Type IRQn);
 

@@ -9,6 +9,7 @@
 #include "rcc_driver.h"
 #include "exti_driver.h"
 #include "nvic_driver.h"
+#include "irq_config.h"
 #include "stm32f4xx_it.h"
 
 #endif /* STM32F4XX_DRIVERS_H */

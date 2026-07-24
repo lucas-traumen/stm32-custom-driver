@@ -2,6 +2,8 @@
 #include "rcc_driver.h"
 #include "exti_driver.h"
 
+GPIO_Handle_t hgpioc = {0};
+
 void GPIO_PeriClockControl(GPIO_TypeDef *pGPIOx, uint8_t EnorDi)
 {
     if(EnorDi == ENABLE)
@@ -204,6 +206,22 @@ uint8_t GPIO_Read_Pin(GPIO_Handle_t *pGPIOHandle,uint8_t GPIO_Pin )
 uint16_t GPIO_Read_Port(GPIO_Handle_t *pGPIOHandle)
 {
     return (pGPIOHandle->pGPIOx->IDR);
+}
+
+/**
+ * @brief Default GPIO setup: PC9 as AF0 push-pull for MCO2 output. Override this weak function per application.
+ */
+__weak void MX_GPIO_Init(void)
+{
+    hgpioc = (GPIO_Handle_t){0};
+    hgpioc.pGPIOx = GPIOC;
+    hgpioc.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_ALTFN;
+    hgpioc.GPIO_PinConfig.GPIO_PinAltFunMode = AF0;
+    hgpioc.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_9;
+    hgpioc.GPIO_PinConfig.GPIO_PinSpeed = GPIO_SPEED_HIGH;
+    hgpioc.GPIO_PinConfig.GPIO_PinOPType = GPIO_OP_TYPE_PP;
+    hgpioc.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_NO_PUPD;
+    GPIO_Init(&hgpioc);
 }
 
 
