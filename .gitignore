@@ -11,3 +11,29 @@ Release/
 
 # Claude internal rules (không commit)
 .claude/
+
+# Shell configs & environment
+.bash_profile
+.bashrc
+.zprofile
+.zshrc
+.profile
+
+# IDE & editor
+.vscode/
+.idea/
+
+# Environment & package
+.env
+node_modules/
+package-lock.json
+package.json
+
+# Config files (local machine specific)
+.mcp.json
+.gitconfig
+.gitmodules
+
+# CLI tools
+.ripgreprc
+
