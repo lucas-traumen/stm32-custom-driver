@@ -1,6 +1,14 @@
 #include "stm32f4xx_it.h"
 #include "exti_driver.h"
 
+volatile uint32_t uwTick;  /* 1ms counter for delay_ms */
+
+void delay_ms(uint32_t ms)
+{
+    uint32_t start = uwTick;
+    while ((uwTick - start) < ms);
+}
+
 void NMI_Handler(void)
 {
 }
@@ -47,6 +55,7 @@ void PendSV_Handler(void)
 
 void SysTick_Handler(void)
 {
+    uwTick++;
 }
 
 void EXTI0_IRQHandler(void)

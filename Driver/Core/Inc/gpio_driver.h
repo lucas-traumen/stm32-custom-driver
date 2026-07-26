@@ -24,6 +24,11 @@ typedef struct
 
 
 
+extern GPIO_Handle_t hgpioa;
+extern GPIO_Handle_t hgpiob;
+extern GPIO_Handle_t hgpioc;
+extern GPIO_Handle_t hgpiod;
+extern GPIO_Handle_t hgpioe;
 
 
 #define GPIO_PIN_NO_0           0
@@ -105,7 +110,6 @@ uint8_t GPIO_Read_Pin(GPIO_Handle_t *pGPIOHandle,uint8_t GPIO_Pin );
 uint16_t GPIO_Read_Port(GPIO_Handle_t *pGPIOHandle);
 void GPIO_Toggle_Pin(GPIO_Handle_t *pGPIOHandle,uint8_t GPIO_Pin);
 
-extern GPIO_Handle_t hgpioc;
 
 /* Default GPIO setup, weak so applications can override per project. */
 __weak void MX_GPIO_Init(void);

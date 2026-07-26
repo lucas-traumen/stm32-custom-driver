@@ -93,12 +93,15 @@ SPI_SendData(SPI2, txbuf, len);            // Gửi data
 ## 4. Tiến độ Driver
 
 ### Đang phát triển (WIP)
-- ⚠️ **GPIO** - Init, Read/Write, Toggle, EXTI → [gpio.md](gpio.md)
-- ⚠️ **SPI** - Master/Slave, blocking TX/RX → [spi.md](spi.md)
-- ⚠️ **RCC** - Clock macros → [rcc.md](rcc.md)
-- ⚠️ **EXTI/NVIC** - Interrupt handling → [exti_nvic.md](exti_nvic.md)
-- ⚠️ **I2C** - Code skeleton (commented) → [i2c.md](i2c.md)
+- ⚠️ **GPIO** - Init, Read/Write, Toggle, EXTI → [driver/gpio.md](driver/gpio.md)
+- ⚠️ **SPI** - Master/Slave, blocking TX/RX → [driver/spi.md](driver/spi.md)
+- ⚠️ **RCC** - Clock macros → [driver/rcc.md](driver/rcc.md)
+- ⚠️ **EXTI/NVIC** - Interrupt handling → [driver/exti_nvic.md](driver/exti_nvic.md)
+- ⚠️ **I2C** - Code skeleton (commented) → [driver/i2c.md](driver/i2c.md)
 - ⚠️ **Restructure** - Đã xong naming, loại bỏ circular dependency
+
+### Ngoại vi (Peripheral)
+- ✅ **ILI9486** - LCD 3.5" 8080 parallel → [peripheral/ili9486.md](peripheral/ili9486.md)
 
 ### Kế hoạch
 - **USART** - Hiện dùng direct register trong main.c
@@ -122,11 +125,16 @@ make -C Debug clean        # Clean
 
 ## 6. Tài liệu chi tiết
 
-Mỗi driver có file `.md` riêng:
-- [GPIO](gpio.md) - Cấu trúc, API, debug tips
-- [SPI](spi.md) - Config, SSM/SSI, pin mapping
-- [I2C](i2c.md) - WIP
-- [RCC](rcc.md) - Clock macros
-- [EXTI/NVIC](exti_nvic.md) - Interrupt handling
+Mỗi driver/ngoại vi có file `.md` riêng, chia theo thư mục:
+
+**`driver/`** - Driver nền (GPIO/SPI/RCC/NVIC/EXTI, style trực tiếp/register, không dùng function pointer)
+- [GPIO](driver/gpio.md) - Cấu trúc, API, debug tips
+- [SPI](driver/spi.md) - Config, SSM/SSI, pin mapping
+- [I2C](driver/i2c.md) - WIP
+- [RCC](driver/rcc.md) - Clock macros
+- [EXTI/NVIC](driver/exti_nvic.md) - Interrupt handling
+
+**`peripheral/`** - Ngoại vi (board/màn/sensor gắn ngoài, có thể dùng function pointer cho setup-level ops)
+- [ILI9486](peripheral/ili9486.md) - LCD 3.5" 320x480, 8080 parallel
 
 **Format:** Struct → Init sequence → API → Notes → Debug

@@ -9,7 +9,7 @@ void System_Clock_Config_100MHz(void)
     RCC_PLL_Config_t pll_config;
     RCC_ClkInit_t clk_init;
 
-    RCC_HSE_Config();
+    RCC_HSE_Enable();
 
     pll_config.PLL_Source = RCC_PLL_SRC_HSE;
     pll_config.PLL_M = 8;
@@ -24,7 +24,7 @@ void System_Clock_Config_100MHz(void)
     clk_init.APB1_Prescaler = RCC_APB_DIV2;
     clk_init.APB2_Prescaler = RCC_APB_DIV1;
     clk_init.FlashLatency = 3;
-    RCC_SysClk_Config(&clk_init);
+    RCC_ClockInit(&clk_init);
 }
 
 void EXTI0_Example_Init(void)
@@ -45,9 +45,9 @@ void EXTI0_Example_Init(void)
     hexti0.EXTI_Config.EXTI_LineCmd = ENABLE;
     EXTI_Init(&hexti0);
 
-    NVIC_SetPriorityGrouping(NVIC_PRIORITY_GROUP_2);
-    NVIC_SetPriority(EXTI0_IRQn, 0, 0);
-    NVIC_EnableIRQ(EXTI0_IRQn);
+    DRV_NVIC_SetPriorityGrouping(NVIC_PRIORITY_GROUP_2);
+    DRV_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+    DRV_NVIC_EnableIRQ(EXTI0_IRQn);
 }
 
 void GPIO_LED_Init(void)

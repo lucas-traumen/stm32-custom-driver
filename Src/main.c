@@ -50,11 +50,9 @@
 //	for(;;);
 //
 //}
-	//#include "stm32f407xx.h"
-//#include "stm32f4xx_drivers.h"
-//#include "stm32f407xx.h"
-//#include "st7735.h"
 #include "stm32f4xx_drivers.h"
+#include "stm32f4xx_it.h"
+#include "ili9486.h"
 #include "signals.h"
 #include "ecg.h"
 #include "arm_math.h"
@@ -239,18 +237,221 @@ void serial_plot_signals(const char *fmt, ...)
 	UartSendString(buf);
 }
 
-void systick_init()
+void SysTick_1ms_Init(void)
 {
-	// disablled SysTick
-	SysTick->CTRL=0;
-	//CLKSRC
-	SysTick->CTRL|=1<<2;
-	//reload value
-	SysTick->LOAD=0x00FFFFFF;
-	//
-	SysTick->VAL=0;
-	//
-	SysTick->CTRL|=1<<0;
+    SysTick->CTRL = 0;
+    SysTick->LOAD = 168000000 / 1000 - 1;  /* 1ms @ 168MHz */
+    SysTick->VAL  = 0;
+    SysTick->CTRL = (1 << 2) | (1 << 1) | (1 << 0);  /* CLKSOURCE=AHB, TICKINT=1, ENABLE=1 */
+}
+/* ==========================================================================
+ *  ILI9486 Test Suite — RGB666 / RGB565 demo functions
+ * ========================================================================== */
+
+static void _utoa3(uint32_t val, char *buf)
+{
+	buf[0] = (char)('0' + val / 100);
+	buf[1] = (char)('0' + (val / 10) % 10);
+	buf[2] = (char)('0' + val % 10);
+	buf[3] = '\0';
+}
+
+static void LCD_Test_ColorBars(void)
+{
+	ILI9486_Color_t bars[] = { ILI9486_RED, ILI9486_GREEN, ILI9486_BLUE,
+							   ILI9486_CYAN, ILI9486_MAGENTA, ILI9486_YELLOW };
+	uint16_t bw = lcd.width / 6;
+	for (int i = 0; i < 6; i++)
+		ILI9486_FillRectangle(bw * i, 0, bw, lcd.height, bars[i]);
+	ILI9486_DrawString(10, 10, "6-Color Bars", &Font_11x18, ILI9486_WHITE, ILI9486_BLACK);
+}
+
+static void LCD_Test_FillSpeed(void)
+{
+	ILI9486_Color_t clr[] = { ILI9486_RED, ILI9486_GREEN, ILI9486_BLUE, ILI9486_WHITE };
+	const char *lbl[] = { "RED ", "GRN ", "BLU ", "WHT " };
+	char buf[32], ms[4];
+	uint32_t t0, t1;
+
+	ILI9486_FillScreen(ILI9486_BLACK);
+	ILI9486_DrawString(10, 10, "Fill Speed Test", &Font_11x18, ILI9486_WHITE, ILI9486_BLACK);
+#if ILI9486_PIXFMT == ILI9486_PIXFMT_RGB666
+	ILI9486_DrawString(10, 35, "Mode: RGB666 (3B/px)", &Font_7x10, ILI9486_CYAN, ILI9486_BLACK);
+#else
+	ILI9486_DrawString(10, 35, "Mode: RGB565 (2B/px)", &Font_7x10, ILI9486_CYAN, ILI9486_BLACK);
+#endif
+	for (int i = 0; i < 4; i++) {
+		t0 = uwTick;
+		ILI9486_FillScreen(clr[i]);
+		t1 = uwTick;
+		_utoa3(t1 - t0, ms);
+		buf[0] = '\0'; strcat(buf, lbl[i]);
+		strcat(buf, ms); strcat(buf, " ms");
+		ILI9486_DrawString(10, 55 + i * 20, buf, &Font_7x10, clr[i], ILI9486_BLACK);
+	}
+}
+
+static void LCD_Test_Checkerboard(void)
+{
+	uint16_t bs = 32;
+	for (uint16_t y = 0; y < lcd.height; y += bs)
+		for (uint16_t x = 0; x < lcd.width; x += bs)
+			ILI9486_FillRectangle(x, y, bs, bs,
+				(((x / bs) + (y / bs)) & 1) ? ILI9486_WHITE : ILI9486_BLACK);
+}
+
+static void LCD_Test_Lines(void)
+{
+	ILI9486_FillScreen(ILI9486_BLACK);
+	for (uint16_t x = 0; x < lcd.width; x += 40)
+		ILI9486_DrawLine(x, 0, x, lcd.height - 1, ILI9486_DARKGREY);
+	for (uint16_t y = 0; y < lcd.height; y += 40)
+		ILI9486_DrawLine(0, y, lcd.width - 1, y, ILI9486_DARKGREY);
+	ILI9486_DrawLine(0, 0, lcd.width - 1, lcd.height - 1, ILI9486_RED);
+	ILI9486_DrawLine(lcd.width - 1, 0, 0, lcd.height - 1, ILI9486_BLUE);
+	ILI9486_DrawLine(lcd.width / 2, 0, lcd.width / 2, lcd.height - 1, ILI9486_GREEN);
+	ILI9486_DrawLine(0, lcd.height / 2, lcd.width - 1, lcd.height / 2, ILI9486_GREEN);
+}
+
+static void LCD_Test_Blocks(void)
+{
+	ILI9486_Color_t clr[] = { ILI9486_RED, ILI9486_GREEN, ILI9486_BLUE,
+		ILI9486_CYAN, ILI9486_MAGENTA, ILI9486_YELLOW };
+	uint16_t bw = lcd.width / 3, bh = lcd.height / 2;
+	for (int r = 0; r < 2; r++)
+		for (int c = 0; c < 3; c++) {
+			uint16_t x = c * bw, y = r * bh;
+			ILI9486_FillRectangle(x, y, bw, bh, clr[r * 3 + c]);
+			ILI9486_DrawLine(x, y, x + bw - 1, y, ILI9486_WHITE);
+			ILI9486_DrawLine(x, y + bh - 1, x + bw - 1, y + bh - 1, ILI9486_WHITE);
+			ILI9486_DrawLine(x, y, x, y + bh - 1, ILI9486_WHITE);
+			ILI9486_DrawLine(x + bw - 1, y, x + bw - 1, y + bh - 1, ILI9486_WHITE);
+		}
+}
+
+static void LCD_Test_Text(void)
+{
+	ILI9486_FillScreen(ILI9486_BLACK);
+	ILI9486_DrawString(10, 10, "RGB666 Text Test", &Font_11x18, ILI9486_WHITE, ILI9486_BLACK);
+	ILI9486_DrawString(10, 40, "Font_11x18: ABC abc 123", &Font_11x18, ILI9486_CYAN, ILI9486_BLACK);
+	ILI9486_DrawString(10, 70, "Font_7x10 slow:", &Font_7x10, ILI9486_YELLOW, ILI9486_BLACK);
+	ILI9486_DrawString(10, 85, "The quick brown fox jumps", &Font_7x10, ILI9486_GREEN, ILI9486_BLACK);
+	ILI9486_DrawString(10, 100,"over the lazy dog 012345", &Font_7x10, ILI9486_GREEN, ILI9486_BLACK);
+	ILI9486_DrawString(10, 120,"Font_7x10 FAST:", &Font_7x10, ILI9486_YELLOW, ILI9486_BLACK);
+	ILI9486_DrawStringFast(10, 135,"THE QUICK BROWN FOX JUMPS", &Font_7x10, ILI9486_CYAN, ILI9486_BLACK);
+	ILI9486_DrawStringFast(10, 150,"OVER THE LAZY DOG 6789!@", &Font_7x10, ILI9486_CYAN, ILI9486_BLACK);
+	ILI9486_DrawLine(8, 8, lcd.width - 2, 8, ILI9486_WHITE);
+	ILI9486_DrawLine(8, lcd.height - 2, lcd.width - 2, lcd.height - 2, ILI9486_WHITE);
+	ILI9486_DrawLine(8, 8, 8, lcd.height - 2, ILI9486_WHITE);
+	ILI9486_DrawLine(lcd.width - 2, 8, lcd.width - 2, lcd.height - 2, ILI9486_WHITE);
+}
+
+static void LCD_Test_Gradient(void)
+{
+	for (int i = 0; i < 16; i++) {
+		uint8_t ch = (uint8_t)((i * 255) / 15);
+		ILI9486_FillRectangle(i * (lcd.width / 16), 0, lcd.width / 16 + 1, lcd.height / 3,
+			ILI9486_COLOR(ch, 0, 0));
+		ILI9486_FillRectangle(i * (lcd.width / 16), lcd.height / 3, lcd.width / 16 + 1, lcd.height / 3,
+			ILI9486_COLOR(0, ch, 0));
+		ILI9486_FillRectangle(i * (lcd.width / 16), 2 * lcd.height / 3, lcd.width / 16 + 1, lcd.height / 3,
+			ILI9486_COLOR(0, 0, ch));
+	}
+}
+
+static void LCD_Test_All(void)
+{
+	LCD_Test_ColorBars();     delay_ms(2500);
+	LCD_Test_FillSpeed();     delay_ms(3500);
+	LCD_Test_Checkerboard();  delay_ms(2000);
+	LCD_Test_Lines();         delay_ms(2500);
+	LCD_Test_Blocks();        delay_ms(3000);
+	LCD_Test_Text();          delay_ms(3000);
+	LCD_Test_Gradient();      delay_ms(3000);
+	ILI9486_FillScreen(ILI9486_BLACK);
+	ILI9486_DrawString(20, 220, "Tests complete!", &Font_11x18, ILI9486_GREEN, ILI9486_BLACK);
+	delay_ms(2000);
+}
+
+static void LCD_Animation_Rainbow(void)
+{
+#if ILI9486_PIXFMT == ILI9486_PIXFMT_RGB666
+	for (int i = 0; i < 32; i++) {
+		uint32_t color;
+		uint8_t phase = (uint8_t)((i * 6) / 32);
+		uint8_t t = (uint8_t)(((i * 6) % 32) * 255 / 32);
+		uint8_t a = 255 - t, bv = t;
+		switch (phase) {
+			case 0: color = ILI9486_COLOR(255, bv, 0); break;
+			case 1: color = ILI9486_COLOR(a, 255, 0); break;
+			case 2: color = ILI9486_COLOR(0, 255, bv); break;
+			case 3: color = ILI9486_COLOR(0, a, 255); break;
+			case 4: color = ILI9486_COLOR(bv, 0, 255); break;
+			default: color = ILI9486_COLOR(255, 0, a); break;
+		}
+		ILI9486_FillScreen(color);
+		ILI9486_DrawString(10, 220, "RGB666 Animation", &Font_11x18, ILI9486_WHITE, ILI9486_BLACK);
+		GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_13);
+		delay_ms(200);
+	}
+#else
+	ILI9486_Color_t clr[] = { ILI9486_RED, ILI9486_GREEN, ILI9486_BLUE, ILI9486_CYAN,
+							  ILI9486_MAGENTA, ILI9486_YELLOW, ILI9486_ORANGE };
+	for (int i = 0; ; i = (i + 1) % 7) {
+		ILI9486_FillScreen(clr[i]);
+		GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_13);
+		delay_ms(300);
+	}
+#endif
+}
+
+static void LCD_GPIO_Init(void)
+{
+    GPIO_Handle_t h = {0};
+
+    /* PB0 = D/CX, PB1 = RST, PB2 = CS, PB5 = WR, PB4 = RD */
+    h.pGPIOx = GPIOB;
+    h.GPIO_PinConfig.GPIO_PinMode   = GPIO_MODE_OUT;
+    h.GPIO_PinConfig.GPIO_PinOPType = GPIO_OP_TYPE_PP;
+    h.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_PIN_PU;
+    h.GPIO_PinConfig.GPIO_PinSpeed  = GPIO_SPEED_HIGH;
+
+    h.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_0;  GPIO_Init(&h);
+    h.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_1;  GPIO_Init(&h);
+    h.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_2;  GPIO_Init(&h);
+    h.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_5;  GPIO_Init(&h);
+    h.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_4;  GPIO_Init(&h);
+
+    /* PD0-PD7 = data bus DB[7:0] */
+    h.pGPIOx = GPIOD;
+    for (uint8_t p = 0; p < 8; p++) {
+        h.GPIO_PinConfig.GPIO_PinNumber = p;
+        GPIO_Init(&h);
+    }
+
+    /*
+     * ODR reset value = 0, nên ngay sau GPIO_Init() các chân điều khiển
+     * đang ở mức LOW (CS được chọn, WR/RD đang strobe, RST đang giữ reset)
+     * cho tới khi có lệnh ghi đầu tiên. Đặt trạng thái nghỉ ngay để tránh
+     * khoảng thời gian CS/WR ở mức không xác định trước ILI9486_Init().
+     */
+    GPIOB->BSRR = (1u << GPIO_PIN_NO_2)   /* CS  = 1 : chưa chọn LCD */
+                | (1u << GPIO_PIN_NO_5)   /* WR  = 1 : nghỉ          */
+                | (1u << GPIO_PIN_NO_4)   /* RD  = 1 : không đọc     */
+                | (1u << GPIO_PIN_NO_1);  /* RST = 1 : không reset   */
+}
+
+static void LCD_Config(void)
+{
+    lcd.data_port = GPIOD;  lcd.data_pin_offset = 0;
+    lcd.cs_port   = GPIOB;  lcd.cs_pin   = GPIO_PIN_NO_2;
+    lcd.dc_port   = GPIOB;  lcd.dc_pin   = GPIO_PIN_NO_0;
+    lcd.wr_port   = GPIOB;  lcd.wr_pin   = GPIO_PIN_NO_5;
+    lcd.rd_port   = GPIOB;  lcd.rd_pin   = GPIO_PIN_NO_4;
+    lcd.rst_port  = GPIOB;  lcd.rst_pin  = GPIO_PIN_NO_1;
+
+    ILI9486_Init();
+    ILI9486_SetRotation(1);  /* landscape */
 }
 
 volatile uint8_t flag=0;
@@ -260,13 +461,13 @@ int main(void) {
 //	RCC->AHB1ENR |= (1 << 3);     // GPIODEN = bit 3
 //	EnableFPU();
 //	systick_init();
-//	hgpiod.pGPIOx= GPIOD;
-//	hgpiod.GPIO_PinConfig.GPIO_PinNumber= GPIO_PIN_NO_13;
-//	hgpiod.GPIO_PinConfig.GPIO_PinMode= GPIO_MODE_OUT;
-//	hgpiod.GPIO_PinConfig.GPIO_PinOPType= GPIO_OP_TYPE_PP;
-//	hgpiod.GPIO_PinConfig.GPIO_PinPuPdControl= GPIO_NO_PUPD;
-//	hgpiod.GPIO_PinConfig.GPIO_PinSpeed= GPIO_SPEED_HIGH;
-//	GPIO_Init(&hgpiod);
+	hgpiod.pGPIOx= GPIOD;
+	hgpiod.GPIO_PinConfig.GPIO_PinNumber= GPIO_PIN_NO_13;
+	hgpiod.GPIO_PinConfig.GPIO_PinMode= GPIO_MODE_OUT;
+	hgpiod.GPIO_PinConfig.GPIO_PinOPType= GPIO_OP_TYPE_PP;
+	hgpiod.GPIO_PinConfig.GPIO_PinPuPdControl= GPIO_NO_PUPD;
+	hgpiod.GPIO_PinConfig.GPIO_PinSpeed= GPIO_SPEED_HIGH;
+	GPIO_Init(&hgpiod);
 //	hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_12;
 //	GPIO_Init(&hgpiod);
 
@@ -337,48 +538,18 @@ int main(void) {
 	SystemClock_Config();
 	MX_GPIO_Init();
 	MX_MCO2_Init();
+	SysTick_1ms_Init();
+	LCD_GPIO_Init();
+	LCD_Config();
+
+	/* Chạy bộ test LCD */
+	LCD_Test_All();
+
 	while (1) {
-		//ST7735_FillScreen(ST7735_RED);
-		//GPIO_Toggle_Pin(GPIOD,GPIO_PIN_NO_13);
-	//	delay_ms(500);
-//		plot_input_signal();
-//		_val_start_measure=SysTick->VAL;
-		//convolution_signals(inputSignal_f32_1kHz_15kHz,impulse_response,convoulution_signals,_1kHz_15kHz_SIG_LEN,IMPULSE_RESPOND_LEN);
-		//arm_conv_f32(inputSignal_f32_1kHz_15kHz, _1kHz_15kHz_SIG_LEN, impulse_response,IMPULSE_RESPOND_LEN ,convoulution_signals );
-
-		//running_sum_average(ecg_signal,ECG_SIGNAL_LEN,running_sum_signals);
-//		dft_real_one_sided_f32(
-//			ecg_signal,
-//		    DFT_N,
-//		    dft_real,
-//		    dft_imag,
-//		    dft_magnitude,
-//		    DFT_BINS
-//		);
-//		for ( int i=0;i<DFT_BINS;i++)
-//			{
-//				serial_plot_signals("$%.5f %.5f;",dft_magnitude[i],ecg_signal[i]);
-//			}
-//		_val_end_measure=SysTick->VAL;
-//		_val_result_measure=1.0*(_val_start_measure-_val_end_measure)/16000000;
-//		pesudo_delay(1000);
-
+		LCD_Animation_Rainbow();
 	}
 
 }
 
 
 //void EXTI0_IRQCallback(uint8_t GPIO_PinNumber)
-//{
-//	if(GPIO_PinNumber == GPIO_PIN_NO_0)
-//	{
-//		delay_ms(50);
-//		if(GPIO_Read_Pin(GPIOA,0)){
-//		flag=1;
-//		GPIO_Toggle_Pin(GPIOD,GPIO_PIN_NO_14);
-//		flag1++;
-//		}
-//	}
-//}
-
-
