@@ -16,10 +16,10 @@ GPIO Pin ──► EXTI (edge detect + IMR/EMR) ──► NVIC (enable + priorit
 | File | Vai trò |
 |------|---------|
 | `gpio_driver.c` (`GPIO_Init`) | Cấu hình SYSCFG EXTICR (map GPIO port → EXTI line) + EXTI edge trigger (RTSR/FTSR) + IMR khi mode = `GPIO_MODE_IT_FT/RT/RFT` |
-| `exti_driver.c` | API riêng cho EXTI nếu muốn cấu hình tách biệt khỏi GPIO |
+| `exti_driver.c` | Chỉ còn IRQ-side API: dispatch (`EXTI_IRQHandling`), pending flag, bảng con trỏ callback + `EXTI_RegisterCallback()`. Không còn hàm init — cấu hình line (trigger/IMR/EXTICR) nằm hoàn toàn trong `GPIO_Init()` |
 | `nvic_driver.c` | API điều khiển NVIC (DRV_NVIC_*), tránh xung đột tên với CMSIS |
 | `irq_config.c` (`IRQ_Init`) | Tập trung enable + set priority cho mọi IRQ trong project |
-| `stm32f4xx_it.c` | ISR handlers — nhận interrupt từ vector table, gọi callback |
+| `stm32f4xx_it.c` | ISR handlers thật — nhận interrupt từ vector table, gọi `EXTI_IRQHandling()`. File `it.c` cũ đã bị xóa (100% dead code, tên hàm không khớp API hiện tại). |
 
 ---
 
@@ -118,72 +118,65 @@ EXTI có 23 lines:
 - **EXTI20**: COMP1 (comparator)
 - **EXTI21**: COMP2
 
-### EXTI_Init() API
+### EXTI driver API (IRQ-side only)
 
 ```c
-typedef enum {
-    EXTI_TRIGGER_RISING = 0,
-    EXTI_TRIGGER_FALLING,
-    EXTI_TRIGGER_RISING_FALLING
-} EXTI_Trigger_t;
-
-typedef enum {
-    EXTI_MODE_INTERRUPT = 0,
-    EXTI_MODE_EVENT
-} EXTI_Mode_t;
-
-typedef struct {
-    uint8_t EXTI_Line;       // 0-15
-    EXTI_Trigger_t EXTI_Trigger;
-    EXTI_Mode_t EXTI_Mode;
-    uint8_t EXTI_LineCmd;    // ENABLE/DISABLE
-} EXTI_Config_t;
-
-typedef struct {
-    EXTI_Config_t EXTI_Config;
-} EXTI_Handle_t;
-
-void EXTI_Init(EXTI_Handle_t *pEXTIHandle);
 void EXTI_DeInit(void);
 void EXTI_IRQHandling(uint8_t EXTI_Line);
 void EXTI_ClearPendingBit(uint8_t EXTI_Line);
 uint8_t EXTI_GetPendingBit(uint8_t EXTI_Line);
+void EXTI_RegisterCallback(uint8_t EXTI_Line, EXTI_Callback_t callback);
 ```
 
-`EXTI_Init()` cấu hình:
-1. IMR hoặc EMR tùy mode (interrupt/event)
-2. RTSR và/hoặc FTSR tùy trigger
-3. Bật/tắt line qua IMR
+Không còn `EXTI_Init()` / `EXTI_Config_t` / `EXTI_Handle_t`. Lý do: line 0-15 luôn gắn với một GPIO pin, và `GPIO_Init()` đã ghi vào đúng những thanh ghi (`FTSR`/`RTSR`/`IMR`/`SYSCFG_EXTICR`) mà một `EXTI_Init()` riêng cũng sẽ ghi — giữ cả hai API dễ dẫn đến 2 nơi cấu hình cùng 1 line theo thứ tự gọi khác nhau, tùy hàm nào chạy sau sẽ "thắng". Line 16-22 (PVD, RTC, comparator) không gắn GPIO nên chưa cần init helper; nếu có use case thật, nên thêm API dành riêng cho nhóm đó (ví dụ `EXTI_ConfigNonGPIOLine()`), không tái sử dụng field kiểu GPIO.
 
-**Lưu ý:** EXTI_Init() **không cấu hình SYSCFG EXTICR** (map GPIO port → EXTI line). Việc đó do `GPIO_Init()` làm.
+### EXTI_IRQHandling() — Function-Pointer Callback + Trap Pattern
 
-### EXTI_IRQHandling() — Weak Callback Pattern
-
-`EXTI_IRQHandling(EXTI_Line)` được gọi từ ISR handler, kiểm tra pending bit, xóa nó, và gọi callback `__weak`:
+Driver không dùng `__weak` callback theo tên cố định nữa. Thay vào đó là **bảng 16 con trỏ hàm**, mỗi phần tử mặc định trỏ vào `EXTI_DefaultCallback()` — một hàm trap (`while(1)`):
 
 ```c
+typedef void (*EXTI_Callback_t)(uint8_t line);
+
+static void EXTI_DefaultCallback(uint8_t line)
+{
+    (void)line;
+    while (1) {
+        /* Unregistered EXTI line fired. Check EXTI_Line in the debugger. */
+    }
+}
+
+static EXTI_Callback_t exti_callbacks[16] = {
+    EXTI_DefaultCallback, EXTI_DefaultCallback, /* ... x16 */
+};
+
 void EXTI_IRQHandling(uint8_t EXTI_Line)
 {
     if(EXTI->PR & (1 << EXTI_Line)) {
-        EXTI->PR |= (1 << EXTI_Line);  // ghi 1 xóa pending
-        switch(EXTI_Line) {
-            case 0:  EXTI0_Callback();  break;
-            case 1:  EXTI1_Callback();  break;
-            // ...
-            case 5..9:  EXTI9_5_Callback(EXTI_Line);  break;
-            case 10..15: EXTI15_10_Callback(EXTI_Line); break;
-        }
+        EXTI->PR |= (1 << EXTI_Line);   // ghi 1 xóa pending
+        exti_callbacks[EXTI_Line](EXTI_Line);
     }
 }
+
+void EXTI_RegisterCallback(uint8_t EXTI_Line, EXTI_Callback_t callback);
 ```
 
-Các callback là `__weak` — user định nghĩa lại trong `main.c` hoặc file ứng dụng mà không cần sửa driver:
+**Vì sao đổi từ `__weak` sang con trỏ hàm:**
+- `__weak` cố định theo tên (`EXTI0_Callback`, `EXTI9_5_Callback`...) buộc phải khai báo 7 signature khác nhau, và không có cách nào detect "quên implement" ngoài việc callback chạy rỗng im lặng.
+- Với bảng con trỏ hàm, **giá trị mặc định chính là hàm trap**. Nếu app enable một EXTI line nhưng quên gọi `EXTI_RegisterCallback()`, ISR sẽ rơi vào `while(1)` ngay khi interrupt đó bắn ra — debugger bắt được ngay dòng nào, không cần viết `while(1)` tay trong `it.c` cho từng interrupt.
+- Khi đã đăng ký callback thật, con trỏ đổi hướng khỏi trap — đây là hành vi đúng, không phải "mất tính năng debug".
+
+**Đăng ký callback (gọi từ code khởi tạo, không phải từ ISR):**
 
 ```c
-void EXTI0_Callback(void) { /* user code */ }
-void EXTI9_5_Callback(uint8_t pin) { /* user code */ }
-void EXTI15_10_Callback(uint8_t pin) { /* user code */ }
+void Button_Handler(uint8_t line)
+{
+    GPIO_Toggle_Pin(&hled, GPIO_PIN_NO_14);
+}
+
+EXTI_RegisterCallback(0, Button_Handler);
 ```
+
+Một signature `void (*)(uint8_t line)` dùng chung cho mọi EXTI line (0-15), kể cả các line từng dùng chung handler (9_5, 15_10) — `line` cho biết chính xác line nào vừa fire.
 
 ---
 
@@ -208,11 +201,7 @@ SYSCFG->EXTICR[0] &= ~(0xF << 0);  // clear field
 SYSCFG->EXTICR[0] |= (0 << 0);     // port A = 0
 ```
 
-**⚠️ Bug hiện tại trong `gpio_driver.c`:** Dòng 117 ghi trực tiếp:
-```c
-SYSCFG->EXTICR[temp1] = portcode << (temp2 * 4);
-```
-Đây là **overwrite**, không phải read-modify-write. Nếu cấu hình 2 EXTI lines khác nhau trong cùng EXTICR (ví dụ PA0 rồi PB1), cấu hình của line đầu sẽ bị mất. Cần sửa thành:
+`GPIO_Init()` dùng read-modify-write cho field này (clear 4-bit field trước, rồi OR giá trị port code), nên cấu hình 2 EXTI lines khác nhau trong cùng EXTICR (ví dụ PA0 rồi PB1) không bị mất:
 ```c
 SYSCFG->EXTICR[temp1] &= ~(0xF << (temp2 * 4));
 SYSCFG->EXTICR[temp1] |= (portcode << (temp2 * 4));
@@ -220,11 +209,9 @@ SYSCFG->EXTICR[temp1] |= (portcode << (temp2 * 4));
 
 ---
 
-## Hai cách cấu hình EXTI
+## Cấu hình EXTI cho GPIO line (0-15)
 
-### Cách 1: Qua GPIO_Init() (khuyên dùng)
-
-Khi `GPIO_PinMode = GPIO_MODE_IT_FT/RT/RFT`, `GPIO_Init()` tự động:
+Chỉ có **một cách**: qua `GPIO_Init()`. Khi `GPIO_PinMode = GPIO_MODE_IT_FT/RT/RFT`, `GPIO_Init()` tự động:
 1. Cấu hình SYSCFG EXTICR (map port → line)
 2. Cấu hình RTSR/FTSR tùy mode
 3. Enable IMR cho line đó
@@ -238,22 +225,9 @@ hbutton.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_PIN_PU;
 GPIO_Init(&hbutton);  // tự set EXTICR + FTSR + IMR
 ```
 
-Sau đó chỉ cần cấu hình NVIC (enable IRQ) và viết ISR.
+Sau đó chỉ cần cấu hình NVIC (enable IRQ), gọi `EXTI_RegisterCallback()`, và viết ISR mỏng trong `stm32f4xx_it.c` gọi `EXTI_IRQHandling()`.
 
-### Cách 2: Qua EXTI_Init()
-
-Dùng khi muốn cấu hình tách biệt khỏi GPIO hoặc cho EXTI lines không phải GPIO (RTC, PVD):
-
-```c
-EXTI_Handle_t hexti;
-hexti.EXTI_Config.EXTI_Line = 0;
-hexti.EXTI_Config.EXTI_Trigger = EXTI_TRIGGER_FALLING;
-hexti.EXTI_Config.EXTI_Mode = EXTI_MODE_INTERRUPT;
-hexti.EXTI_Config.EXTI_LineCmd = ENABLE;
-EXTI_Init(&hexti);
-```
-
-Vẫn phải tự cấu hình SYSCFG EXTICR và NVIC riêng. Không dùng EXTI_Init() cho GPIO trừ khi bạn có lý do đặc biệt.
+**Không có `EXTI_Init()` cho line 0-15** — đã bị bỏ hẳn vì nó ghi vào cùng thanh ghi (FTSR/RTSR/IMR) mà `GPIO_Init()` cũng ghi, dẫn đến xung đột thật tùy thứ tự gọi hàm (từng xảy ra trong project: `GPIO_Init` đặt falling-edge, code init EXTI cũ đặt rising-edge cho cùng line 0 — cấu hình cuối cùng phụ thuộc ai gọi sau). Line 16-22 (không gắn GPIO) chưa có API riêng, thêm khi có use case thật.
 
 ---
 
@@ -366,12 +340,12 @@ DRV_NVIC_EnableIRQ(EXTI0_IRQn);
 
 // 3. ISR — đã có trong stm32f4xx_it.c, gọi EXTI_IRQHandling(0)
 
-// 4. Callback (trong file ứng dụng)
-void EXTI0_Callback(void)
+// 4. Callback (trong file ứng dụng) + đăng ký
+void Button_Handler(uint8_t line)
 {
     // Debounce đơn giản
     for(volatile uint32_t i = 0; i < 50000; i++);
-    if(GPIO_Read_Pin(GPIOA, GPIO_PIN_NO_0) == 0) {
+    if(GPIO_Read_Pin(&hbutton, GPIO_PIN_NO_0) == 0) {
         GPIO_Toggle_Pin(&hled, GPIO_PIN_NO_14);
     }
 }
@@ -382,6 +356,7 @@ int main(void)
     SystemClock_Config();
     MX_GPIO_Init();      // cấu hình tất cả GPIO (button + LED)
     IRQ_Init();          // enable NVIC cho EXTI0
+    EXTI_RegisterCallback(0, Button_Handler);  // BẮT BUỘC, thiếu bước này line 0 sẽ trap
 
     while(1) {
         // main loop — ISR xử lý button
@@ -416,7 +391,7 @@ Tổng cộng STM32F407 có 98 vector ngắt (IRQn từ -14 đến 81). System e
 | | NVIC chưa enable | `NVIC->ISER[IRQn/32] & (1 << (IRQn%32))` |
 | Handler không chạy dù pending | NVIC priority cao hơn ISR đang chạy | Kiểm tra preempt priority |
 | Interrupt loop vô hạn | Quên xóa pending flag | `EXTI->PR \|= (1 << line)` trong ISR |
-| Callback không được gọi | Quên override (define lại hàm) | Kiểm tra linker có báo `multiple definition` không; nếu không, callback vẫn là `__weak` (rỗng) |
+| Chương trình treo (while(1) im lặng) sau khi enable 1 EXTI line | Quên gọi `EXTI_RegisterCallback()` cho line đó | Đây là trap có chủ đích của `EXTI_DefaultCallback()`. Xem giá trị `EXTI_Line`/PC trong debugger để biết line nào chưa đăng ký, rồi gọi `EXTI_RegisterCallback()` cho line đó trước khi enable NVIC |
 | Priority không đúng | Grouping chưa set hoặc set sai | `SCB->AIRCR & 0x700` |
 | DRV_NVIC_SetPriority trả về false | PreemptPriority/SubPriority vượt range cho grouping hiện tại | Gọi `DRV_NVIC_GetPriorityLimit()` trước để tra cứu |
 
@@ -428,3 +403,5 @@ Tổng cộng STM32F407 có 98 vector ngắt (IRQn từ -14 đến 81). System e
 - **IMR vs EMR**: IMR cho phép IRQ đến NVIC; EMR cho phép event (wake from sleep, không tạo IRQ). Có thể bật cả 2 cùng lúc.
 - **DRV_NVIC_SetPriority**: trả về `bool` — luôn kiểm tra return value khi debug priority issue.
 - **SYSCFG clock**: phải bật clock cho SYSCFG trước khi ghi EXTICR (`SYSCFG_PCLK_EN()`). `GPIO_Init()` đã làm việc này.
+- **Thứ tự bắt buộc**: `EXTI_RegisterCallback()` phải gọi **trước** khi `DRV_NVIC_EnableIRQ()` cho line đó — nếu enable trước, một interrupt bắn ra giữa lúc đó sẽ rơi vào trap dù bạn sắp đăng ký callback.
+- **`it.c` đã bị xóa**: là code chết (toàn bộ comment, tên hàm không khớp API hiện tại). ISR thật nằm ở `stm32f4xx_it.c/h`, không có `it.h` riêng.

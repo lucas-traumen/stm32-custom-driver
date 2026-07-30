@@ -8,18 +8,18 @@
 
 typedef struct
 {
-    uint8_t GPIO_PinNumber;
-    uint8_t GPIO_PinMode;
-    uint8_t GPIO_PinSpeed;
-    uint8_t GPIO_PinPuPdControl;
-    uint8_t GPIO_PinOPType;
-    uint8_t GPIO_PinAltFunMode;
+    uint8_t GPIO_PinNumber;        /* Pin number, one of GPIO_PIN_NO_x */
+    uint8_t GPIO_PinMode;          /* Pin mode, one of @GPIO_MODE_x */
+    uint8_t GPIO_PinSpeed;         /* Output speed, one of @GPIO_SPEED_x */
+    uint8_t GPIO_PinPuPdControl;   /* Pull-up/pull-down config, one of @GPIO_NO_PUPD / GPIO_PIN_PU / GPIO_PIN_PD */
+    uint8_t GPIO_PinOPType;        /* Output type, one of @GPIO_OP_TYPE_x (push-pull or open-drain) */
+    uint8_t GPIO_PinAltFunMode;    /* Alternate function number, one of AF0..AF15 (only used when mode is GPIO_MODE_ALTFN) */
 }GPIO_PinConfig_t;
 
 typedef struct
 {
-    GPIO_TypeDef *pGPIOx;
-    GPIO_PinConfig_t GPIO_PinConfig;
+    GPIO_TypeDef *pGPIOx;               /* Base address of the GPIO peripheral (GPIOA..GPIOI) */
+    GPIO_PinConfig_t GPIO_PinConfig;    /* Configuration settings for the pin */
 }GPIO_Handle_t;
 
 
@@ -110,9 +110,8 @@ uint8_t GPIO_Read_Pin(GPIO_Handle_t *pGPIOHandle,uint8_t GPIO_Pin );
 uint16_t GPIO_Read_Port(GPIO_Handle_t *pGPIOHandle);
 void GPIO_Toggle_Pin(GPIO_Handle_t *pGPIOHandle,uint8_t GPIO_Pin);
 
-
 /* Default GPIO setup, weak so applications can override per project. */
-__weak void MX_GPIO_Init(void);
+void MX_GPIO_Init(void);
 
 #endif
 

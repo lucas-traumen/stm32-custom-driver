@@ -34,3 +34,4 @@ document/
 | File                     | Module                | Trạng thái        |
 |--------------------------|------------------------|-------------------|
 | `peripheral/ili9486.md` | ILI9486 LCD            | Hoàn chỉnh        |
+| `peripheral/lis3dsh.md` | LIS3DSH accelerometer  | Hoàn chỉnh        |

@@ -1,6 +1,5 @@
 #include "system.h"
 
-static EXTI_Handle_t hexti0;
 static GPIO_Handle_t hgpioa_button;
 static GPIO_Handle_t hgpiod_leds;
 
@@ -27,6 +26,16 @@ void System_Clock_Config_100MHz(void)
     RCC_ClockInit(&clk_init);
 }
 
+static void EXTI0_Callback(uint8_t line)
+{
+    (void)line;
+    for(volatile uint32_t i = 0; i < 50000; i++);
+
+    if(GPIO_Read_Pin(&hgpioa_button, GPIO_PIN_NO_0) == 0) {
+        GPIO_Toggle_Pin(&hgpiod_leds, GPIO_PIN_NO_14);
+    }
+}
+
 void EXTI0_Example_Init(void)
 {
     hgpioa_button.pGPIOx = GPIOA;
@@ -35,15 +44,7 @@ void EXTI0_Example_Init(void)
     hgpioa_button.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_NO_PUPD;
     GPIO_Init(&hgpioa_button);
 
-    SYSCFG_PCLK_EN();
-    SYSCFG->EXTICR[0] &= ~(0xF << 0);
-    SYSCFG->EXTICR[0] |= (0 << 0);
-
-    hexti0.EXTI_Config.EXTI_Line = 0;
-    hexti0.EXTI_Config.EXTI_Trigger = EXTI_TRIGGER_FALLING;
-    hexti0.EXTI_Config.EXTI_Mode = EXTI_MODE_INTERRUPT;
-    hexti0.EXTI_Config.EXTI_LineCmd = ENABLE;
-    EXTI_Init(&hexti0);
+    EXTI_RegisterCallback(0, EXTI0_Callback);
 
     DRV_NVIC_SetPriorityGrouping(NVIC_PRIORITY_GROUP_2);
     DRV_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
@@ -66,13 +67,4 @@ void GPIO_LED_Init(void)
     GPIO_Init(&hgpiod_leds);
     hgpiod_leds.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_15;
     GPIO_Init(&hgpiod_leds);
-}
-
-void EXTI0_Callback(void)
-{
-    for(volatile uint32_t i = 0; i < 50000; i++);
-
-    if(GPIO_Read_Pin(GPIOA, GPIO_PIN_NO_0) == 0) {
-        GPIO_Toggle_Pin(&hgpiod_leds, GPIO_PIN_NO_14);
-    }
 }

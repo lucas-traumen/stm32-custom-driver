@@ -130,6 +130,39 @@ bool DRV_NVIC_SetPriority(IRQn_Type IRQn, uint8_t PreemptPriority, uint8_t SubPr
 }
 
 /**
+ * @brief Set priority for Cortex-M4 system exceptions (MemManage, BusFault, etc.)
+ * @param IRQn             System exception IRQ number (negative: MemManage/BusFault/.../SysTick)
+ * @param PreemptPriority  Preemption priority (0..15, grouping-dependent)
+ * @param SubPriority      Subpriority (0..15, grouping-dependent)
+ *
+ * System exception priority registers (SCB->SHP) follow the same priority
+ * encoding as NVIC->IP (upper 4 bits). Valid IRQn values:
+ *   MemManage_IRQn (-12), BusFault_IRQn (-11), UsageFault_IRQn (-10),
+ *   SVCall_IRQn    ( -5), DebugMonitor_IRQn (-4),
+ *   PendSV_IRQn   ( -2), SysTick_IRQn      (-1)
+ *
+ * NonMaskableInt (-14) and HardFault (-13) have fixed priority and cannot be changed.
+ */
+void DRV_NVIC_SetSystemHandlerPriority(IRQn_Type IRQn, uint8_t PreemptPriority, uint8_t SubPriority)
+{
+    if ((int32_t)IRQn >= 0) {
+        return;  /* peripheral IRQ, use DRV_NVIC_SetPriority instead */
+    }
+
+    DRV_NVIC_PriorityLimit_t lim = DRV_NVIC_GetPriorityLimit();
+
+    if (PreemptPriority > lim.PreemptMax) return;
+    if (SubPriority     > lim.SubMax)     return;
+
+    uint8_t shift = (uint8_t)DRV_NVIC_GetPriorityGrouping() - 3;
+    uint8_t encoded_priority = (PreemptPriority << shift) | SubPriority;
+
+    /* Map IRQn to SCB->SHP index per CMSIS formula: SHP[((uint32_t)IRQn & 0xF) - 4] */
+    uint32_t shp_idx = (((uint32_t)(int32_t)IRQn) & 0xFUL) - 4UL;
+    SCB->SHP[shp_idx] = (uint8_t)(encoded_priority << 4);
+}
+
+/**
  * @brief Clear the pending flag of an interrupt
  * @param IRQn Interrupt number
  *

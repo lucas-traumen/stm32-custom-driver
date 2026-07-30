@@ -25,6 +25,7 @@ void DRV_NVIC_SetPriorityGrouping(uint32_t PriorityGroup);
 uint32_t DRV_NVIC_GetPriorityGrouping(void);
 DRV_NVIC_PriorityLimit_t DRV_NVIC_GetPriorityLimit(void);
 bool DRV_NVIC_SetPriority(IRQn_Type IRQn, uint8_t PreemptPriority, uint8_t SubPriority);
+void DRV_NVIC_SetSystemHandlerPriority(IRQn_Type IRQn, uint8_t PreemptPriority, uint8_t SubPriority);
 void DRV_NVIC_ClearPendingIRQ(IRQn_Type IRQn);
 uint32_t DRV_NVIC_GetPendingIRQ(IRQn_Type IRQn);
 

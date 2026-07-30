@@ -114,7 +114,8 @@ void GPIO_Init(GPIO_Handle_t *pGPIOHandle)
         uint8_t temp2 = pGPIOHandle->GPIO_PinConfig.GPIO_PinNumber % 4;
         uint8_t portcode = GPIO_BASEADDR_TO_CODE(pGPIOHandle->pGPIOx);
         SYSCFG_PCLK_EN();
-        SYSCFG->EXTICR[temp1] = portcode << ( temp2 * 4);
+        SYSCFG->EXTICR[temp1] &= ~(0xF << (temp2 * 4)); //clear the 4-bit field for this line, preserving the other 3 lines in this register
+        SYSCFG->EXTICR[temp1] |= (portcode << (temp2 * 4));
 
         //3 . enable the exti interrupt delivery using IMR (Interrupt mask register)
         EXTI->IMR |= 1 << pGPIOHandle->GPIO_PinConfig.GPIO_PinNumber;
@@ -213,15 +214,23 @@ uint16_t GPIO_Read_Port(GPIO_Handle_t *pGPIOHandle)
  */
 __weak void MX_GPIO_Init(void)
 {
-    hgpioc = (GPIO_Handle_t){0};
-    hgpioc.pGPIOx = GPIOC;
-    hgpioc.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_ALTFN;
-    hgpioc.GPIO_PinConfig.GPIO_PinAltFunMode = AF0;
-    hgpioc.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_9;
-    hgpioc.GPIO_PinConfig.GPIO_PinSpeed = GPIO_SPEED_HIGH;
-    hgpioc.GPIO_PinConfig.GPIO_PinOPType = GPIO_OP_TYPE_PP;
-    hgpioc.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_NO_PUPD;
-    GPIO_Init(&hgpioc);
+    hgpioa = (GPIO_Handle_t){0};
+    hgpioa.pGPIOx = GPIOA;
+    hgpioa.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_IT_FT;
+    hgpioa.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_0;
+    hgpioa.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_NO_PUPD;
+    GPIO_Init(&hgpioa);
+
+    hgpiod = (GPIO_Handle_t){0};
+    hgpiod.pGPIOx = GPIOD;
+    hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_13;
+    hgpiod.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_OUT;
+    hgpiod.GPIO_PinConfig.GPIO_PinOPType = GPIO_OP_TYPE_PP;
+    hgpiod.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_NO_PUPD;
+    hgpiod.GPIO_PinConfig.GPIO_PinSpeed = GPIO_SPEED_HIGH;
+    GPIO_Init(&hgpiod);
+    hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_14;
+    GPIO_Init(&hgpiod);
 }
 
 

@@ -53,16 +53,60 @@
 #include "stm32f4xx_drivers.h"
 #include "stm32f4xx_it.h"
 #include "ili9486.h"
+#include "lis3dsh.h"
 #include "signals.h"
 #include "ecg.h"
 #include "arm_math.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
+
+/* ======================== LIS3DSH hardware debug globals ========================
+ * STM32F407 Discovery onboard accelerometer là LIS3DSH trên rev mới.
+ * WHO_AM_I đúng: 0x3F. Không UART, không mock test trong main.c.
+ */
+
+/* TDC-GP22 SPI opcodes. */
+#define GP22_OPCODE_POWER_ON_RESET      0x50U
+#define GP22_OPCODE_INIT                0x70U
+#define GP22_OPCODE_START_TOF           0x01U
+#define GP22_OPCODE_START_TEMP          0x02U
+#define GP22_OPCODE_START_CAL_RESONATOR 0x03U
+#define GP22_OPCODE_START_CAL_TDC       0x04U
+#define GP22_OPCODE_START_TOF_RESTART   0x05U
+#define GP22_OPCODE_START_TEMP_RESTART  0x06U
+#define GP22_OPCODE_READ_ID             0xB7U
+#define GP22_OPCODE_READ_PW1ST          0xB8U
+#define GP22_OPCODE_EEPROM_WRITE_CFG    0xC0U
+#define GP22_OPCODE_EEPROM_LOAD_CFG     0xF0U
+#define GP22_OPCODE_EEPROM_COMPARE_CFG  0xC6U
+#define GP22_OPCODE_WRITE_REG(addr)     (uint8_t)(0x80U | ((addr) & 0x07U))
+#define GP22_OPCODE_READ_REG(addr)      (uint8_t)(0xB0U | ((addr) & 0x07U))
+
+/* TDC-GP22 direct config-register opcodes for quick debugger tests. */
+#define GP22_OPCODE_WRITE_REG0          GP22_OPCODE_WRITE_REG(0U)  /* 0x80 */
+#define GP22_OPCODE_WRITE_REG1          GP22_OPCODE_WRITE_REG(1U)  /* 0x81 */
+#define GP22_OPCODE_WRITE_REG2          GP22_OPCODE_WRITE_REG(2U)  /* 0x82 */
+#define GP22_OPCODE_WRITE_REG3          GP22_OPCODE_WRITE_REG(3U)  /* 0x83 */
+#define GP22_OPCODE_WRITE_REG4          GP22_OPCODE_WRITE_REG(4U)  /* 0x84 */
+#define GP22_OPCODE_WRITE_REG5          GP22_OPCODE_WRITE_REG(5U)  /* 0x85 */
+#define GP22_OPCODE_WRITE_REG6          GP22_OPCODE_WRITE_REG(6U)  /* 0x86 */
+#define GP22_OPCODE_READ_REG0           GP22_OPCODE_READ_REG(0U)   /* 0xB0 */
+#define GP22_OPCODE_READ_REG1           GP22_OPCODE_READ_REG(1U)   /* 0xB1 */
+#define GP22_OPCODE_READ_REG2           GP22_OPCODE_READ_REG(2U)   /* 0xB2 */
+#define GP22_OPCODE_READ_REG3           GP22_OPCODE_READ_REG(3U)   /* 0xB3 */
+#define GP22_OPCODE_READ_REG4           GP22_OPCODE_READ_REG(4U)   /* 0xB4 */
+#define GP22_OPCODE_READ_REG5           GP22_OPCODE_READ_REG(5U)   /* 0xB5 */
+#define GP22_OPCODE_READ_REG6           GP22_OPCODE_READ_REG(6U)   /* 0xB6 */
+
 GPIO_Handle_t hgpiod;
-//GPIO_Handle_t hgpioa;
+GPIO_Handle_t hgpioa;
 GPIO_Handle_t hgpiob;
-//SPI_Handle_t hspi2;
+GPIO_Handle_t hgpioe;
+SPI_Handle_t hspi1;
+
+SPI_Handle_t hspi2;
 uint32_t cnt=0;
 float32_t g_in_sig_sample=0.0f;
 float32_t g_in_convolution_signal=0.0f;
@@ -72,6 +116,32 @@ float32_t running_sum_signals[ECG_SIGNAL_LEN]={0.0f};
 float32_t dft_real[DFT_BINS]={0.0f};
 float32_t dft_imag[DFT_BINS]={0.0f};
 float32_t dft_magnitude[DFT_BINS]={0.0f};
+
+uint8_t result=0;
+/* GP22 test buffers. The SPI driver sends dummy clocks during receive phase. */
+uint8_t tx_buf1[] = {0x0F};
+uint8_t tx_buf2[] = {};
+
+uint8_t rx_buf[8] = { 0U };
+volatile uint8_t spi_txrx_done = 0U;
+DriverStatus_t status1;
+DriverStatus_t status2;
+
+/*----------------Function prototype--------------------*/
+
+void MX_GPIO_Init();
+void MX_SPI_Init();
+
+
+
+
+
+
+
+
+
+
+
 
 void EnableFPU()
 {
@@ -129,6 +199,23 @@ float32_t _val_result_measure=0.0f;
 
 volatile char buffer[32];
 volatile uint32_t buffer_index = 0;
+
+static void UART1_GPIO_Init(void)
+{
+    hgpiob = (GPIO_Handle_t){0};
+    hgpiob.pGPIOx = GPIOB;
+    hgpiob.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_ALTFN;
+    hgpiob.GPIO_PinConfig.GPIO_PinAltFunMode = AF7;
+    hgpiob.GPIO_PinConfig.GPIO_PinOPType = GPIO_OP_TYPE_PP;
+    hgpiob.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_PIN_PU;
+    hgpiob.GPIO_PinConfig.GPIO_PinSpeed = GPIO_SPEED_HIGH;
+
+    /* USART1_TX = PB6, USART1_RX = PB7 */
+    hgpiob.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_6;
+    GPIO_Init(&hgpiob);
+    hgpiob.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_7;
+    GPIO_Init(&hgpiob);
+}
 
 void UART_init()
 {
@@ -244,6 +331,223 @@ void SysTick_1ms_Init(void)
     SysTick->VAL  = 0;
     SysTick->CTRL = (1 << 2) | (1 << 1) | (1 << 0);  /* CLKSOURCE=AHB, TICKINT=1, ENABLE=1 */
 }
+
+/* ==========================================================================
+ *  LIS3DSH Hardware Driver Bring-up qua SPI
+ *  STM32F407 Discovery rev mới dùng LIS3DSH, không phải LIS3DH.
+ *  Mapping theo MX_SPI_Init(): SPI1 + software CS PE3.
+ *
+ *  Các biến dưới đây cố ý để global để xem bằng debugger/watch window.
+ * ========================================================================== */
+
+LIS3DSH_t lis3dsh;
+LIS3DSH_AxesRaw_t lis3dsh_raw;
+LIS3DSH_AxesMg_t lis3dsh_mg;
+volatile uint8_t lis3dsh_whoami = 0U;
+volatile uint8_t lis3dsh_status_reg = 0U;
+volatile DriverStatus_t lis3dsh_status_code = STATUS_ERROR;
+volatile uint32_t lis3dsh_sample_count = 0U;
+volatile uint32_t lis3dsh_error_count = 0U;
+volatile uint32_t lis3dsh_last_error_step = 0U;
+volatile int32_t lis3dsh_x_mg = 0;
+volatile int32_t lis3dsh_y_mg = 0;
+volatile int32_t lis3dsh_z_mg = 0;
+volatile int16_t lis3dsh_x_raw = 0;
+volatile int16_t lis3dsh_y_raw = 0;
+volatile int16_t lis3dsh_z_raw = 0;
+volatile uint8_t lis3dsh_last_spi_cmd = 0U;
+volatile uint8_t lis3dsh_last_spi_reg = 0U;
+volatile uint16_t lis3dsh_last_spi_len = 0U;
+volatile uint8_t lis3dsh_last_spi_data0 = 0U;
+
+#define LIS3DSH_ERR_STEP_NONE       0U
+#define LIS3DSH_ERR_STEP_WHOAMI     1U
+#define LIS3DSH_ERR_STEP_INIT       2U
+#define LIS3DSH_ERR_STEP_STATUS     3U
+#define LIS3DSH_ERR_STEP_RAW        4U
+
+static void LIS3DSH_UpdatePublicAxisVars(void)
+{
+    int32_t ug_lsb = LIS3DSH_GetSensitivityUgPerLsb(&lis3dsh);
+
+    lis3dsh_x_raw = lis3dsh_raw.x;
+    lis3dsh_y_raw = lis3dsh_raw.y;
+    lis3dsh_z_raw = lis3dsh_raw.z;
+
+    lis3dsh_mg.x = ((int32_t)lis3dsh_raw.x * ug_lsb) / 1000;
+    lis3dsh_mg.y = ((int32_t)lis3dsh_raw.y * ug_lsb) / 1000;
+    lis3dsh_mg.z = ((int32_t)lis3dsh_raw.z * ug_lsb) / 1000;
+
+    lis3dsh_x_mg = lis3dsh_mg.x;
+    lis3dsh_y_mg = lis3dsh_mg.y;
+    lis3dsh_z_mg = lis3dsh_mg.z;
+}
+
+static DriverStatus_t Board_LIS3DSH_SPI_Write(void *bus_ctx,
+                                              uint8_t dev_addr,
+                                              uint8_t reg,
+                                              const uint8_t *data,
+                                              uint16_t len,
+                                              uint32_t timeout_ms)
+{
+    SPI_Handle_t *hspi = (SPI_Handle_t *)bus_ctx;
+    DriverStatus_t st;
+    uint8_t cmd = reg;
+
+    (void)dev_addr;
+
+    if ((hspi == 0) || (data == 0) || (len == 0U)) {
+        return STATUS_ERROR;
+    }
+
+    /* LIS3DSH: multi-byte sequential access is controlled by CTRL_REG6.ADD_INC,
+     * not by a multi-byte bit in the SPI command. */
+
+    lis3dsh_last_spi_cmd = cmd;
+    lis3dsh_last_spi_reg = reg;
+    lis3dsh_last_spi_len = len;
+    lis3dsh_last_spi_data0 = data[0];
+
+    SPI_ChipSelect(hspi, ENABLE);
+    st = SPI_Transmit(hspi, &cmd, 1U, timeout_ms);
+    if (st == STATUS_OK) {
+        st = SPI_Transmit(hspi, data, len, timeout_ms);
+    }
+    SPI_ChipSelect(hspi, DISABLE);
+
+    return st;
+}
+
+static DriverStatus_t Board_LIS3DSH_SPI_Read(void *bus_ctx,
+                                             uint8_t dev_addr,
+                                             uint8_t reg,
+                                             uint8_t *data,
+                                             uint16_t len,
+                                             uint32_t timeout_ms)
+{
+    SPI_Handle_t *hspi = (SPI_Handle_t *)bus_ctx;
+    DriverStatus_t st;
+    uint8_t cmd = (uint8_t)(reg | LIS3DSH_SPI_READ_BIT); /* bit7 = 1 để đọc */
+
+    (void)dev_addr;
+
+    if ((hspi == 0) || (data == 0) || (len == 0U)) {
+        return STATUS_ERROR;
+    }
+
+    /* LIS3DSH: multi-byte sequential access is controlled by CTRL_REG6.ADD_INC,
+     * not by a multi-byte bit in the SPI command. */
+
+    lis3dsh_last_spi_cmd = cmd;
+    lis3dsh_last_spi_reg = reg;
+    lis3dsh_last_spi_len = len;
+
+    SPI_ChipSelect(hspi, ENABLE);
+    st = SPI_Transmit(hspi, &cmd, 1U, timeout_ms);
+    if (st == STATUS_OK) {
+        st = SPI_Receive(hspi, data, len, timeout_ms);
+        if (st == STATUS_OK) {
+            lis3dsh_last_spi_data0 = data[0];
+        }
+    }
+    SPI_ChipSelect(hspi, DISABLE);
+
+    return st;
+}
+
+static DriverStatus_t LIS3DSH_Hardware_Init(void)
+{
+    DriverStatus_t st;
+
+    memset(&lis3dsh, 0, sizeof(lis3dsh));
+    memset(&lis3dsh_raw, 0, sizeof(lis3dsh_raw));
+    memset(&lis3dsh_mg, 0, sizeof(lis3dsh_mg));
+
+    lis3dsh_whoami = 0U;
+    lis3dsh_status_reg = 0U;
+    lis3dsh_sample_count = 0U;
+    lis3dsh_error_count = 0U;
+    lis3dsh_last_error_step = LIS3DSH_ERR_STEP_NONE;
+
+    LIS3DSH_DefaultConfig(&lis3dsh.cfg);
+    lis3dsh.cfg.odr = LIS3DSH_ODR_100HZ;
+    lis3dsh.cfg.scale = LIS3DSH_SCALE_2G;
+    lis3dsh.cfg.axes_enable = LIS3DSH_AXIS_XYZ_EN;
+    lis3dsh.cfg.block_data_update = 1U;
+
+    lis3dsh.bus_ctx = &hspi1;
+    lis3dsh.dev_addr = 0U; /* SPI không dùng address */
+    lis3dsh.bus.write = Board_LIS3DSH_SPI_Write;
+    lis3dsh.bus.read = Board_LIS3DSH_SPI_Read;
+    lis3dsh.bus.delay_ms = delay_ms;
+    lis3dsh.timeout_ms = 100U;
+
+    {
+        uint8_t whoami_tmp = 0U;
+        st = LIS3DSH_ReadReg(&lis3dsh, LIS3DSH_REG_WHO_AM_I, &whoami_tmp);
+        lis3dsh_whoami = whoami_tmp;
+    }
+    if (st != STATUS_OK) {
+        lis3dsh_status_code = st;
+        lis3dsh_last_error_step = LIS3DSH_ERR_STEP_WHOAMI;
+        lis3dsh_error_count++;
+        return st;
+    }
+
+    if (lis3dsh_whoami != LIS3DSH_WHO_AM_I_VALUE) {
+        lis3dsh_status_code = STATUS_ERROR;
+        lis3dsh_last_error_step = LIS3DSH_ERR_STEP_WHOAMI;
+        lis3dsh_error_count++;
+        return STATUS_ERROR;
+    }
+
+    st = LIS3DSH_Init(&lis3dsh);
+    lis3dsh_status_code = st;
+    if (st != STATUS_OK) {
+        lis3dsh_last_error_step = LIS3DSH_ERR_STEP_INIT;
+        lis3dsh_error_count++;
+        return st;
+    }
+
+    lis3dsh_last_error_step = LIS3DSH_ERR_STEP_NONE;
+    return STATUS_OK;
+}
+
+static void LIS3DSH_Hardware_Poll(void)
+{
+    DriverStatus_t st;
+
+    {
+        uint8_t status_tmp = 0U;
+        st = LIS3DSH_ReadStatus(&lis3dsh, &status_tmp);
+        lis3dsh_status_reg = status_tmp;
+    }
+    if (st != STATUS_OK) {
+        lis3dsh_status_code = st;
+        lis3dsh_last_error_step = LIS3DSH_ERR_STEP_STATUS;
+        lis3dsh_error_count++;
+        GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_14);
+        return;
+    }
+
+    st = LIS3DSH_ReadRaw(&lis3dsh, &lis3dsh_raw);
+    if (st != STATUS_OK) {
+        lis3dsh_status_code = st;
+        lis3dsh_last_error_step = LIS3DSH_ERR_STEP_RAW;
+        lis3dsh_error_count++;
+        GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_14);
+        return;
+    }
+
+    LIS3DSH_UpdatePublicAxisVars();
+    lis3dsh_status_code = STATUS_OK;
+    lis3dsh_last_error_step = LIS3DSH_ERR_STEP_NONE;
+    lis3dsh_sample_count++;
+
+    /* LED xanh toggle mỗi sample OK. */
+    GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_13);
+}
+
 /* ==========================================================================
  *  ILI9486 Test Suite — RGB666 / RGB565 demo functions
  * ========================================================================== */
@@ -454,20 +758,54 @@ static void LCD_Config(void)
     ILI9486_SetRotation(1);  /* landscape */
 }
 
-volatile uint8_t flag=0;
-volatile uint8_t flag1=0;
+void Button_handler(uint8_t line)
+{
+	if(line == 0)
+	{
+		_val_start_measure++;
+		delay_ms(1000);
+		//for(volatile uint32_t i = 0; i < 50000; i++)
+		GPIO_Toggle_Pin(&hgpiod,GPIO_PIN_NO_13);
+		GPIO_Toggle_Pin(&hgpiod,GPIO_PIN_NO_14);
+
+	}
+	
+}
+void MPU_handler(SPI_Handle_t *pSPIHandle, uint8_t AppEvent)
+{
+	(void)pSPIHandle;
+
+	if (AppEvent == SPI_EVENT_TX_CMPLT)
+	{
+		GPIO_Write_Pin(&hgpiod, GPIO_PIN_NO_14, 1);
+	}
+	else if (AppEvent == SPI_EVENT_RX_CMPLT)
+	{
+
+		GPIO_Write_Pin(&hgpiod, GPIO_PIN_NO_13, 1);
+
+	}
+	else if (AppEvent == SPI_EVENT_TXRX_CMPLT)
+	{
+		/* Command-phase dummy RX is discarded by the driver; rx_buf[0] is data. */
+
+		GPIO_Write_Pin(&hgpiod, GPIO_PIN_NO_13, 1);
+		GPIO_Write_Pin(&hgpiod, GPIO_PIN_NO_14, 1);
+	}
+	else if (AppEvent == SPI_EVENT_OVR_ERR)
+	{
+		GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_14);
+	}
+}
+
+
+
 int main(void) {
 	// /* 1. Bật clock cho GPIOD */
 //	RCC->AHB1ENR |= (1 << 3);     // GPIODEN = bit 3
 //	EnableFPU();
 //	systick_init();
-	hgpiod.pGPIOx= GPIOD;
-	hgpiod.GPIO_PinConfig.GPIO_PinNumber= GPIO_PIN_NO_13;
-	hgpiod.GPIO_PinConfig.GPIO_PinMode= GPIO_MODE_OUT;
-	hgpiod.GPIO_PinConfig.GPIO_PinOPType= GPIO_OP_TYPE_PP;
-	hgpiod.GPIO_PinConfig.GPIO_PinPuPdControl= GPIO_NO_PUPD;
-	hgpiod.GPIO_PinConfig.GPIO_PinSpeed= GPIO_SPEED_HIGH;
-	GPIO_Init(&hgpiod);
+
 //	hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_12;
 //	GPIO_Init(&hgpiod);
 
@@ -535,21 +873,165 @@ int main(void) {
 
 
 
-	SystemClock_Config();
-	MX_GPIO_Init();
-	MX_MCO2_Init();
+	SystemClock_Config();   
 	SysTick_1ms_Init();
-	LCD_GPIO_Init();
-	LCD_Config();
+	MX_GPIO_Init();
+	MX_SPI_Init();
+	IRQ_Init();
 
+	/* Hardware bring-up LIS3DSH. Không dùng UART/serial, xem biến global bằng debugger. */
+	lis3dsh_status_code = LIS3DSH_Hardware_Init();
+	if (lis3dsh_status_code != STATUS_OK) {
+		GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_14);
+	}
+
+	//  EXTI_RegisterCallback(0,Button_handler);
+
+	// MX_MCO2_Init();
+
+
+	//LCD_GPIO_Init();
+	//LCD_Config();
+
+	//GP22_TestCommunication();
 	/* Chạy bộ test LCD */
-	LCD_Test_All();
+	//LCD_Test_All();
+	/* For register reads: send command, discard command-phase RX, then auto-dummy to receive. */
+	//status1 = SPI_TransmitReceive_IT(&hspi1, tx_buf2, sizeof(tx_buf2), rx_buf, 1);
+
+
+//
+//	spi_txrx_done = 0U;
+//	SPI_ChipSelect(&hspi1, ENABLE);
+//
+//	/* Queue RX before SPI1 IRQ can complete the 1-byte TX. */
+//	DRV_NVIC_DisableIRQ(SPI1_IRQn);
+//	status1 = SPI_Transmit_IT(&hspi1, tx_buf2, sizeof(tx_buf2));
+//	status2 = SPI_Receive_IT(&hspi1, rx_buf, 1U);
+//	DRV_NVIC_EnableIRQ(SPI1_IRQn);
+//
+//	if ((status1 != STATUS_OK) || (status2 != STATUS_OK))
+//	{
+//		SPI_ChipSelect(&hspi1, DISABLE);
+//	}
+//
+//	while (spi_txrx_done == 0U) { }
+//	spi_txrx_done = 0U;
+//
+//	/* GP22 is on SPI2: reset/write/read must all use hspi2, not hspi1. */
+//	SPI_ChipSelect(&hspi2, ENABLE);
+//	status1 = SPI_Transmit_IT(&hspi2, &reset_cmd, 1U);
+//	while (hspi2.ITMode != SPI_IT_MODE_NONE) { }
+//	SPI_ChipSelect(&hspi2, DISABLE);
+//	delay_ms(10);
+//
+//	SPI_ChipSelect(&hspi2, ENABLE);
+//	status1 = SPI_Transmit_IT(&hspi2, tx_buf1, sizeof(tx_buf1));
+//	while (hspi2.ITMode != SPI_IT_MODE_NONE) { }
+//	SPI_ChipSelect(&hspi2, DISABLE);
+//	delay_ms(1);
+
+	
+
+//	uint8_t opcode = GP22_OPCODE_READ_REG(5);
+//
+//	DRV_NVIC_DisableIRQ(SPI2_IRQn);
+//	status1 = SPI_Transmit(&hspi2,&opcode ,1 ,1000);
+//	status2 = SPI_Receive_IT(&hspi2, (rx_buf + 1), 1U);
+//	DRV_NVIC_EnableIRQ(SPI2_IRQn);
+//
+//	if ((status1 != STATUS_OK) || (status2 != STATUS_OK))
+//	{
+//		SPI_ChipSelect(&hspi2, DISABLE);
+//	}
+//
+//	while (spi_txrx_done == 0U) { }
+
+//
+//	delay_ms(1000);
 
 	while (1) {
-		LCD_Animation_Rainbow();
+		if (lis3dsh_status_code == STATUS_OK) {
+			LIS3DSH_Hardware_Poll();
+			delay_ms(100U);
+		} else {
+			/* Lỗi init/bus/WHO_AM_I: LED cam toggle và thử init lại. */
+			GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_14);
+			delay_ms(500U);
+			lis3dsh_status_code = LIS3DSH_Hardware_Init();
+		}
 	}
 
 }
 
+
+/*-------------------------------------------------------------------------------------*/
+
+void MX_GPIO_Init()
+{
+    hgpioa = (GPIO_Handle_t){0};
+    hgpioa.pGPIOx = GPIOA;
+    hgpioa.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_IT_FT;
+    hgpioa.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_0;
+    hgpioa.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_NO_PUPD;
+    GPIO_Init(&hgpioa);
+
+    hgpiod = (GPIO_Handle_t){0};
+    hgpiod.pGPIOx = GPIOD;
+    hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_13;
+    hgpiod.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_OUT;
+    hgpiod.GPIO_PinConfig.GPIO_PinOPType = GPIO_OP_TYPE_PP;
+    hgpiod.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_NO_PUPD;
+    hgpiod.GPIO_PinConfig.GPIO_PinSpeed = GPIO_SPEED_HIGH;
+    GPIO_Init(&hgpiod);
+    hgpiod.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_14;
+    GPIO_Init(&hgpiod);
+
+	hgpioe = (GPIO_Handle_t){0};
+    hgpioe.pGPIOx = GPIOE;
+    hgpioe.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_3;
+    hgpioe.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_OUT;
+    hgpioe.GPIO_PinConfig.GPIO_PinOPType = GPIO_OP_TYPE_PP;
+    hgpioe.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_NO_PUPD;
+    hgpioe.GPIO_PinConfig.GPIO_PinSpeed = GPIO_SPEED_HIGH;
+    GPIO_Init(&hgpioe);
+	hgpioe.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_4;
+	GPIO_Init(&hgpioe);
+
+    /* PE3/PE4 đang dùng làm software CS, trạng thái idle phải HIGH. */
+    GPIOE->BSRR = (1u << GPIO_PIN_NO_3) | (1u << GPIO_PIN_NO_4);
+}
+void MX_SPI_Init()
+{
+	hspi1 = (SPI_Handle_t){0};
+	hspi1.pSPIx=SPI1;
+	hspi1.SPIConfig.speed=SPI_SCLK_SPEED_DIV128;
+	hspi1.SPIConfig.SPI_DeviceMode=SPI_DEVICE_MODE_MASTER;
+	hspi1.SPIConfig.SPI_BusConfig=SPI_BUS_CONFIG_FD;
+	hspi1.SPIConfig.SPI_DFF=SPI_DFF_8bits;
+	hspi1.SPIConfig.SPI_Frame_format=MSB_TRANSMITTED_FIRST;
+	/* LIS3DSH SPI dùng mode 3: CPOL=1, CPHA=1. */
+	hspi1.SPIConfig.SPI_CPHA=SPI_CPHA_HIGH;
+	hspi1.SPIConfig.SPI_CPOL=SPI_CPOL_HIGH;
+	hspi1.SPIConfig.SPI_SSM=SPI_SSM_EN;
+	hspi1.CS_Port=GPIOE;
+	hspi1.CS_Pin=GPIO_PIN_NO_3;
+	SPI_GpioConfig(hspi1.pSPIx);
+	SPI_Init(&hspi1);
+	hspi2 = (SPI_Handle_t){0};
+	hspi2.pSPIx=SPI2;
+	hspi2.SPIConfig.speed=SPI_SCLK_SPEED_DIV256;
+	hspi2.SPIConfig.SPI_DeviceMode=SPI_DEVICE_MODE_MASTER;
+	hspi2.SPIConfig.SPI_BusConfig=SPI_BUS_CONFIG_FD;
+	hspi2.SPIConfig.SPI_DFF=SPI_DFF_8bits;
+	hspi2.SPIConfig.SPI_Frame_format=MSB_TRANSMITTED_FIRST;
+	hspi2.SPIConfig.SPI_CPHA=SPI_CPHA_HIGH;
+	hspi2.SPIConfig.SPI_CPOL=SPI_CPOL_LOW;
+	hspi2.SPIConfig.SPI_SSM=SPI_SSM_EN;
+	hspi2.CS_Port=GPIOE;
+	hspi2.CS_Pin=GPIO_PIN_NO_4;
+	SPI_GpioConfig(hspi2.pSPIx);
+	SPI_Init(&hspi2);
+}
 
 //void EXTI0_IRQCallback(uint8_t GPIO_PinNumber)

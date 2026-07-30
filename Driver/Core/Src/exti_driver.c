@@ -1,34 +1,26 @@
 #include "exti_driver.h"
 
-void EXTI_Init(EXTI_Handle_t *pEXTIHandle)
+/**
+ * @brief Trap for an EXTI line whose callback was never registered
+ *
+ * Halts execution so a debugger session shows exactly which line fired
+ * without a real handler attached. This is the default entry in
+ * exti_callbacks[] for every line until EXTI_RegisterCallback() is called.
+ */
+static void EXTI_DefaultCallback(uint8_t line)
 {
-    uint8_t line = pEXTIHandle->EXTI_Config.EXTI_Line;
-
-    if(pEXTIHandle->EXTI_Config.EXTI_Mode == EXTI_MODE_INTERRUPT) {
-        EXTI->IMR |= (1 << line);
-        EXTI->EMR &= ~(1 << line);
-    } else {
-        EXTI->EMR |= (1 << line);
-        EXTI->IMR &= ~(1 << line);
-    }
-
-    if(pEXTIHandle->EXTI_Config.EXTI_Trigger == EXTI_TRIGGER_RISING) {
-        EXTI->RTSR |= (1 << line);
-        EXTI->FTSR &= ~(1 << line);
-    } else if(pEXTIHandle->EXTI_Config.EXTI_Trigger == EXTI_TRIGGER_FALLING) {
-        EXTI->FTSR |= (1 << line);
-        EXTI->RTSR &= ~(1 << line);
-    } else if(pEXTIHandle->EXTI_Config.EXTI_Trigger == EXTI_TRIGGER_RISING_FALLING) {
-        EXTI->RTSR |= (1 << line);
-        EXTI->FTSR |= (1 << line);
-    }
-
-    if(pEXTIHandle->EXTI_Config.EXTI_LineCmd == ENABLE) {
-        EXTI->IMR |= (1 << line);
-    } else {
-        EXTI->IMR &= ~(1 << line);
+    (void)line;
+    while (1) {
+        /* Unregistered EXTI line fired. Check EXTI_Line in the debugger. */
     }
 }
+
+static EXTI_Callback_t exti_callbacks[16] = {
+    EXTI_DefaultCallback, EXTI_DefaultCallback, EXTI_DefaultCallback, EXTI_DefaultCallback,
+    EXTI_DefaultCallback, EXTI_DefaultCallback, EXTI_DefaultCallback, EXTI_DefaultCallback,
+    EXTI_DefaultCallback, EXTI_DefaultCallback, EXTI_DefaultCallback, EXTI_DefaultCallback,
+    EXTI_DefaultCallback, EXTI_DefaultCallback, EXTI_DefaultCallback, EXTI_DefaultCallback,
+};
 
 void EXTI_DeInit(void)
 {
@@ -43,40 +35,26 @@ void EXTI_IRQHandling(uint8_t EXTI_Line)
 {
     if(EXTI->PR & (1 << EXTI_Line)) {
         EXTI->PR |= (1 << EXTI_Line);
-
-        switch(EXTI_Line) {
-            case 0:
-                EXTI0_Callback();
-                break;
-            case 1:
-                EXTI1_Callback();
-                break;
-            case 2:
-                EXTI2_Callback();
-                break;
-            case 3:
-                EXTI3_Callback();
-                break;
-            case 4:
-                EXTI4_Callback();
-                break;
-            case 5:
-            case 6:
-            case 7:
-            case 8:
-            case 9:
-                EXTI9_5_Callback(EXTI_Line);
-                break;
-            case 10:
-            case 11:
-            case 12:
-            case 13:
-            case 14:
-            case 15:
-                EXTI15_10_Callback(EXTI_Line);
-                break;
-        }
+        exti_callbacks[EXTI_Line](EXTI_Line);
     }
+}
+
+/**
+ * @brief Register the handler to run when EXTI_Line fires
+ * @param EXTI_Line Line number 0-15
+ * @param callback  Function invoked from EXTI_IRQHandling() with EXTI_Line
+ *                  as its argument; pass NULL to revert to the trap
+ * @note  Called from application/init code, not from an ISR. Until this
+ *        is called for a given line, that line's IRQ traps in
+ *        EXTI_DefaultCallback() so an unhandled interrupt is caught
+ *        immediately instead of silently doing nothing.
+ */
+void EXTI_RegisterCallback(uint8_t EXTI_Line, EXTI_Callback_t callback)
+{
+    if (EXTI_Line > 15 || callback == NULL) {
+        return;
+    }
+    exti_callbacks[EXTI_Line] = callback;
 }
 
 void EXTI_ClearPendingBit(uint8_t EXTI_Line)
@@ -87,32 +65,4 @@ void EXTI_ClearPendingBit(uint8_t EXTI_Line)
 uint8_t EXTI_GetPendingBit(uint8_t EXTI_Line)
 {
     return ((EXTI->PR >> EXTI_Line) & 1);
-}
-
-__weak void EXTI0_Callback(void)
-{
-}
-
-__weak void EXTI1_Callback(void)
-{
-}
-
-__weak void EXTI2_Callback(void)
-{
-}
-
-__weak void EXTI3_Callback(void)
-{
-}
-
-__weak void EXTI4_Callback(void)
-{
-}
-
-__weak void EXTI9_5_Callback(uint8_t pin)
-{
-}
-
-__weak void EXTI15_10_Callback(uint8_t pin)
-{
 }
