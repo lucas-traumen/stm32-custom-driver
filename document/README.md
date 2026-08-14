@@ -14,6 +14,11 @@ Mỗi file markdown mô tả một peripheral hoặc chủ đề DSP đang đư�
 ```
 document/
 ├── driver/       # Driver nền: GPIO, SPI, RCC, EXTI/NVIC, I2C (register trực tiếp)
+│   ├── gpio/     #   Mỗi protocol 1 thư mục, kèm image/ chứa hình ảnh cho file .md
+│   ├── spi/
+│   ├── i2c/
+│   ├── rcc/
+│   └── exti_nvic/
 └── peripheral/   # Ngoại vi: LCD, sensor, module cắm ngoài (có thể dùng function pointer)
 ```
 
@@ -21,13 +26,13 @@ document/
 
 ### `driver/`
 
-| File                     | Module                | Trạng thái        |
-|--------------------------|------------------------|-------------------|
-| `driver/gpio.md`        | GPIO driver            | Hoàn chỉnh        |
-| `driver/spi.md`         | SPI driver             | Hoàn chỉnh        |
-| `driver/i2c.md`         | I2C driver             | WIP (code comment)|
-| `driver/rcc.md`         | RCC / Clock macros     | Hoàn chỉnh        |
-| `driver/exti_nvic.md`   | EXTI + NVIC interrupt  | Hoàn chỉnh        |
+| File                            | Module                | Trạng thái        |
+|---------------------------------|------------------------|-------------------|
+| `driver/gpio/gpio.md`          | GPIO driver            | Hoàn chỉnh        |
+| `driver/spi/spi.md`            | SPI driver             | Hoàn chỉnh        |
+| `driver/i2c/i2c.md`            | I2C driver             | WIP (code comment)|
+| `driver/rcc/rcc.md`            | RCC / Clock macros     | Hoàn chỉnh        |
+| `driver/exti_nvic/exti_nvic.md`| EXTI + NVIC interrupt  | Hoàn chỉnh        |
 
 ### `peripheral/`
 

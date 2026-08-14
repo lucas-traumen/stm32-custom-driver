@@ -62,51 +62,17 @@
 #include <string.h>
 #include <stdint.h>
 
-/* ======================== LIS3DSH hardware debug globals ========================
- * STM32F407 Discovery onboard accelerometer là LIS3DSH trên rev mới.
- * WHO_AM_I đúng: 0x3F. Không UART, không mock test trong main.c.
- */
-
-/* TDC-GP22 SPI opcodes. */
-#define GP22_OPCODE_POWER_ON_RESET      0x50U
-#define GP22_OPCODE_INIT                0x70U
-#define GP22_OPCODE_START_TOF           0x01U
-#define GP22_OPCODE_START_TEMP          0x02U
-#define GP22_OPCODE_START_CAL_RESONATOR 0x03U
-#define GP22_OPCODE_START_CAL_TDC       0x04U
-#define GP22_OPCODE_START_TOF_RESTART   0x05U
-#define GP22_OPCODE_START_TEMP_RESTART  0x06U
-#define GP22_OPCODE_READ_ID             0xB7U
-#define GP22_OPCODE_READ_PW1ST          0xB8U
-#define GP22_OPCODE_EEPROM_WRITE_CFG    0xC0U
-#define GP22_OPCODE_EEPROM_LOAD_CFG     0xF0U
-#define GP22_OPCODE_EEPROM_COMPARE_CFG  0xC6U
-#define GP22_OPCODE_WRITE_REG(addr)     (uint8_t)(0x80U | ((addr) & 0x07U))
-#define GP22_OPCODE_READ_REG(addr)      (uint8_t)(0xB0U | ((addr) & 0x07U))
-
-/* TDC-GP22 direct config-register opcodes for quick debugger tests. */
-#define GP22_OPCODE_WRITE_REG0          GP22_OPCODE_WRITE_REG(0U)  /* 0x80 */
-#define GP22_OPCODE_WRITE_REG1          GP22_OPCODE_WRITE_REG(1U)  /* 0x81 */
-#define GP22_OPCODE_WRITE_REG2          GP22_OPCODE_WRITE_REG(2U)  /* 0x82 */
-#define GP22_OPCODE_WRITE_REG3          GP22_OPCODE_WRITE_REG(3U)  /* 0x83 */
-#define GP22_OPCODE_WRITE_REG4          GP22_OPCODE_WRITE_REG(4U)  /* 0x84 */
-#define GP22_OPCODE_WRITE_REG5          GP22_OPCODE_WRITE_REG(5U)  /* 0x85 */
-#define GP22_OPCODE_WRITE_REG6          GP22_OPCODE_WRITE_REG(6U)  /* 0x86 */
-#define GP22_OPCODE_READ_REG0           GP22_OPCODE_READ_REG(0U)   /* 0xB0 */
-#define GP22_OPCODE_READ_REG1           GP22_OPCODE_READ_REG(1U)   /* 0xB1 */
-#define GP22_OPCODE_READ_REG2           GP22_OPCODE_READ_REG(2U)   /* 0xB2 */
-#define GP22_OPCODE_READ_REG3           GP22_OPCODE_READ_REG(3U)   /* 0xB3 */
-#define GP22_OPCODE_READ_REG4           GP22_OPCODE_READ_REG(4U)   /* 0xB4 */
-#define GP22_OPCODE_READ_REG5           GP22_OPCODE_READ_REG(5U)   /* 0xB5 */
-#define GP22_OPCODE_READ_REG6           GP22_OPCODE_READ_REG(6U)   /* 0xB6 */
-
+/* Private variables ---------------------------------------------------------*/
 GPIO_Handle_t hgpiod;
 GPIO_Handle_t hgpioa;
 GPIO_Handle_t hgpiob;
 GPIO_Handle_t hgpioe;
-SPI_Handle_t hspi1;
 
+SPI_Handle_t hspi1;
 SPI_Handle_t hspi2;
+
+i2c_driver_t hi2c1;
+
 uint32_t cnt=0;
 float32_t g_in_sig_sample=0.0f;
 float32_t g_in_convolution_signal=0.0f;
@@ -131,18 +97,11 @@ DriverStatus_t status2;
 
 void MX_GPIO_Init();
 void MX_SPI_Init();
+void MX_I2C_Init();
 
 
 
-
-
-
-
-
-
-
-
-
+/*Function definitions*/
 void EnableFPU()
 {
 	SCB->CPACR |=(3UL<<22)|(3UL<<20);
@@ -332,431 +291,7 @@ void SysTick_1ms_Init(void)
     SysTick->CTRL = (1 << 2) | (1 << 1) | (1 << 0);  /* CLKSOURCE=AHB, TICKINT=1, ENABLE=1 */
 }
 
-/* ==========================================================================
- *  LIS3DSH Hardware Driver Bring-up qua SPI
- *  STM32F407 Discovery rev mới dùng LIS3DSH, không phải LIS3DH.
- *  Mapping theo MX_SPI_Init(): SPI1 + software CS PE3.
- *
- *  Các biến dưới đây cố ý để global để xem bằng debugger/watch window.
- * ========================================================================== */
 
-LIS3DSH_t lis3dsh;
-LIS3DSH_AxesRaw_t lis3dsh_raw;
-LIS3DSH_AxesMg_t lis3dsh_mg;
-volatile uint8_t lis3dsh_whoami = 0U;
-volatile uint8_t lis3dsh_status_reg = 0U;
-volatile DriverStatus_t lis3dsh_status_code = STATUS_ERROR;
-volatile uint32_t lis3dsh_sample_count = 0U;
-volatile uint32_t lis3dsh_error_count = 0U;
-volatile uint32_t lis3dsh_last_error_step = 0U;
-volatile int32_t lis3dsh_x_mg = 0;
-volatile int32_t lis3dsh_y_mg = 0;
-volatile int32_t lis3dsh_z_mg = 0;
-volatile int16_t lis3dsh_x_raw = 0;
-volatile int16_t lis3dsh_y_raw = 0;
-volatile int16_t lis3dsh_z_raw = 0;
-volatile uint8_t lis3dsh_last_spi_cmd = 0U;
-volatile uint8_t lis3dsh_last_spi_reg = 0U;
-volatile uint16_t lis3dsh_last_spi_len = 0U;
-volatile uint8_t lis3dsh_last_spi_data0 = 0U;
-
-#define LIS3DSH_ERR_STEP_NONE       0U
-#define LIS3DSH_ERR_STEP_WHOAMI     1U
-#define LIS3DSH_ERR_STEP_INIT       2U
-#define LIS3DSH_ERR_STEP_STATUS     3U
-#define LIS3DSH_ERR_STEP_RAW        4U
-
-static void LIS3DSH_UpdatePublicAxisVars(void)
-{
-    int32_t ug_lsb = LIS3DSH_GetSensitivityUgPerLsb(&lis3dsh);
-
-    lis3dsh_x_raw = lis3dsh_raw.x;
-    lis3dsh_y_raw = lis3dsh_raw.y;
-    lis3dsh_z_raw = lis3dsh_raw.z;
-
-    lis3dsh_mg.x = ((int32_t)lis3dsh_raw.x * ug_lsb) / 1000;
-    lis3dsh_mg.y = ((int32_t)lis3dsh_raw.y * ug_lsb) / 1000;
-    lis3dsh_mg.z = ((int32_t)lis3dsh_raw.z * ug_lsb) / 1000;
-
-    lis3dsh_x_mg = lis3dsh_mg.x;
-    lis3dsh_y_mg = lis3dsh_mg.y;
-    lis3dsh_z_mg = lis3dsh_mg.z;
-}
-
-static DriverStatus_t Board_LIS3DSH_SPI_Write(void *bus_ctx,
-                                              uint8_t dev_addr,
-                                              uint8_t reg,
-                                              const uint8_t *data,
-                                              uint16_t len,
-                                              uint32_t timeout_ms)
-{
-    SPI_Handle_t *hspi = (SPI_Handle_t *)bus_ctx;
-    DriverStatus_t st;
-    uint8_t cmd = reg;
-
-    (void)dev_addr;
-
-    if ((hspi == 0) || (data == 0) || (len == 0U)) {
-        return STATUS_ERROR;
-    }
-
-    /* LIS3DSH: multi-byte sequential access is controlled by CTRL_REG6.ADD_INC,
-     * not by a multi-byte bit in the SPI command. */
-
-    lis3dsh_last_spi_cmd = cmd;
-    lis3dsh_last_spi_reg = reg;
-    lis3dsh_last_spi_len = len;
-    lis3dsh_last_spi_data0 = data[0];
-
-    SPI_ChipSelect(hspi, ENABLE);
-    st = SPI_Transmit(hspi, &cmd, 1U, timeout_ms);
-    if (st == STATUS_OK) {
-        st = SPI_Transmit(hspi, data, len, timeout_ms);
-    }
-    SPI_ChipSelect(hspi, DISABLE);
-
-    return st;
-}
-
-static DriverStatus_t Board_LIS3DSH_SPI_Read(void *bus_ctx,
-                                             uint8_t dev_addr,
-                                             uint8_t reg,
-                                             uint8_t *data,
-                                             uint16_t len,
-                                             uint32_t timeout_ms)
-{
-    SPI_Handle_t *hspi = (SPI_Handle_t *)bus_ctx;
-    DriverStatus_t st;
-    uint8_t cmd = (uint8_t)(reg | LIS3DSH_SPI_READ_BIT); /* bit7 = 1 để đọc */
-
-    (void)dev_addr;
-
-    if ((hspi == 0) || (data == 0) || (len == 0U)) {
-        return STATUS_ERROR;
-    }
-
-    /* LIS3DSH: multi-byte sequential access is controlled by CTRL_REG6.ADD_INC,
-     * not by a multi-byte bit in the SPI command. */
-
-    lis3dsh_last_spi_cmd = cmd;
-    lis3dsh_last_spi_reg = reg;
-    lis3dsh_last_spi_len = len;
-
-    SPI_ChipSelect(hspi, ENABLE);
-    st = SPI_Transmit(hspi, &cmd, 1U, timeout_ms);
-    if (st == STATUS_OK) {
-        st = SPI_Receive(hspi, data, len, timeout_ms);
-        if (st == STATUS_OK) {
-            lis3dsh_last_spi_data0 = data[0];
-        }
-    }
-    SPI_ChipSelect(hspi, DISABLE);
-
-    return st;
-}
-
-static DriverStatus_t LIS3DSH_Hardware_Init(void)
-{
-    DriverStatus_t st;
-
-    memset(&lis3dsh, 0, sizeof(lis3dsh));
-    memset(&lis3dsh_raw, 0, sizeof(lis3dsh_raw));
-    memset(&lis3dsh_mg, 0, sizeof(lis3dsh_mg));
-
-    lis3dsh_whoami = 0U;
-    lis3dsh_status_reg = 0U;
-    lis3dsh_sample_count = 0U;
-    lis3dsh_error_count = 0U;
-    lis3dsh_last_error_step = LIS3DSH_ERR_STEP_NONE;
-
-    LIS3DSH_DefaultConfig(&lis3dsh.cfg);
-    lis3dsh.cfg.odr = LIS3DSH_ODR_100HZ;
-    lis3dsh.cfg.scale = LIS3DSH_SCALE_2G;
-    lis3dsh.cfg.axes_enable = LIS3DSH_AXIS_XYZ_EN;
-    lis3dsh.cfg.block_data_update = 1U;
-
-    lis3dsh.bus_ctx = &hspi1;
-    lis3dsh.dev_addr = 0U; /* SPI không dùng address */
-    lis3dsh.bus.write = Board_LIS3DSH_SPI_Write;
-    lis3dsh.bus.read = Board_LIS3DSH_SPI_Read;
-    lis3dsh.bus.delay_ms = delay_ms;
-    lis3dsh.timeout_ms = 100U;
-
-    {
-        uint8_t whoami_tmp = 0U;
-        st = LIS3DSH_ReadReg(&lis3dsh, LIS3DSH_REG_WHO_AM_I, &whoami_tmp);
-        lis3dsh_whoami = whoami_tmp;
-    }
-    if (st != STATUS_OK) {
-        lis3dsh_status_code = st;
-        lis3dsh_last_error_step = LIS3DSH_ERR_STEP_WHOAMI;
-        lis3dsh_error_count++;
-        return st;
-    }
-
-    if (lis3dsh_whoami != LIS3DSH_WHO_AM_I_VALUE) {
-        lis3dsh_status_code = STATUS_ERROR;
-        lis3dsh_last_error_step = LIS3DSH_ERR_STEP_WHOAMI;
-        lis3dsh_error_count++;
-        return STATUS_ERROR;
-    }
-
-    st = LIS3DSH_Init(&lis3dsh);
-    lis3dsh_status_code = st;
-    if (st != STATUS_OK) {
-        lis3dsh_last_error_step = LIS3DSH_ERR_STEP_INIT;
-        lis3dsh_error_count++;
-        return st;
-    }
-
-    lis3dsh_last_error_step = LIS3DSH_ERR_STEP_NONE;
-    return STATUS_OK;
-}
-
-static void LIS3DSH_Hardware_Poll(void)
-{
-    DriverStatus_t st;
-
-    {
-        uint8_t status_tmp = 0U;
-        st = LIS3DSH_ReadStatus(&lis3dsh, &status_tmp);
-        lis3dsh_status_reg = status_tmp;
-    }
-    if (st != STATUS_OK) {
-        lis3dsh_status_code = st;
-        lis3dsh_last_error_step = LIS3DSH_ERR_STEP_STATUS;
-        lis3dsh_error_count++;
-        GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_14);
-        return;
-    }
-
-    st = LIS3DSH_ReadRaw(&lis3dsh, &lis3dsh_raw);
-    if (st != STATUS_OK) {
-        lis3dsh_status_code = st;
-        lis3dsh_last_error_step = LIS3DSH_ERR_STEP_RAW;
-        lis3dsh_error_count++;
-        GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_14);
-        return;
-    }
-
-    LIS3DSH_UpdatePublicAxisVars();
-    lis3dsh_status_code = STATUS_OK;
-    lis3dsh_last_error_step = LIS3DSH_ERR_STEP_NONE;
-    lis3dsh_sample_count++;
-
-    /* LED xanh toggle mỗi sample OK. */
-    GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_13);
-}
-
-/* ==========================================================================
- *  ILI9486 Test Suite — RGB666 / RGB565 demo functions
- * ========================================================================== */
-
-static void _utoa3(uint32_t val, char *buf)
-{
-	buf[0] = (char)('0' + val / 100);
-	buf[1] = (char)('0' + (val / 10) % 10);
-	buf[2] = (char)('0' + val % 10);
-	buf[3] = '\0';
-}
-
-static void LCD_Test_ColorBars(void)
-{
-	ILI9486_Color_t bars[] = { ILI9486_RED, ILI9486_GREEN, ILI9486_BLUE,
-							   ILI9486_CYAN, ILI9486_MAGENTA, ILI9486_YELLOW };
-	uint16_t bw = lcd.width / 6;
-	for (int i = 0; i < 6; i++)
-		ILI9486_FillRectangle(bw * i, 0, bw, lcd.height, bars[i]);
-	ILI9486_DrawString(10, 10, "6-Color Bars", &Font_11x18, ILI9486_WHITE, ILI9486_BLACK);
-}
-
-static void LCD_Test_FillSpeed(void)
-{
-	ILI9486_Color_t clr[] = { ILI9486_RED, ILI9486_GREEN, ILI9486_BLUE, ILI9486_WHITE };
-	const char *lbl[] = { "RED ", "GRN ", "BLU ", "WHT " };
-	char buf[32], ms[4];
-	uint32_t t0, t1;
-
-	ILI9486_FillScreen(ILI9486_BLACK);
-	ILI9486_DrawString(10, 10, "Fill Speed Test", &Font_11x18, ILI9486_WHITE, ILI9486_BLACK);
-#if ILI9486_PIXFMT == ILI9486_PIXFMT_RGB666
-	ILI9486_DrawString(10, 35, "Mode: RGB666 (3B/px)", &Font_7x10, ILI9486_CYAN, ILI9486_BLACK);
-#else
-	ILI9486_DrawString(10, 35, "Mode: RGB565 (2B/px)", &Font_7x10, ILI9486_CYAN, ILI9486_BLACK);
-#endif
-	for (int i = 0; i < 4; i++) {
-		t0 = uwTick;
-		ILI9486_FillScreen(clr[i]);
-		t1 = uwTick;
-		_utoa3(t1 - t0, ms);
-		buf[0] = '\0'; strcat(buf, lbl[i]);
-		strcat(buf, ms); strcat(buf, " ms");
-		ILI9486_DrawString(10, 55 + i * 20, buf, &Font_7x10, clr[i], ILI9486_BLACK);
-	}
-}
-
-static void LCD_Test_Checkerboard(void)
-{
-	uint16_t bs = 32;
-	for (uint16_t y = 0; y < lcd.height; y += bs)
-		for (uint16_t x = 0; x < lcd.width; x += bs)
-			ILI9486_FillRectangle(x, y, bs, bs,
-				(((x / bs) + (y / bs)) & 1) ? ILI9486_WHITE : ILI9486_BLACK);
-}
-
-static void LCD_Test_Lines(void)
-{
-	ILI9486_FillScreen(ILI9486_BLACK);
-	for (uint16_t x = 0; x < lcd.width; x += 40)
-		ILI9486_DrawLine(x, 0, x, lcd.height - 1, ILI9486_DARKGREY);
-	for (uint16_t y = 0; y < lcd.height; y += 40)
-		ILI9486_DrawLine(0, y, lcd.width - 1, y, ILI9486_DARKGREY);
-	ILI9486_DrawLine(0, 0, lcd.width - 1, lcd.height - 1, ILI9486_RED);
-	ILI9486_DrawLine(lcd.width - 1, 0, 0, lcd.height - 1, ILI9486_BLUE);
-	ILI9486_DrawLine(lcd.width / 2, 0, lcd.width / 2, lcd.height - 1, ILI9486_GREEN);
-	ILI9486_DrawLine(0, lcd.height / 2, lcd.width - 1, lcd.height / 2, ILI9486_GREEN);
-}
-
-static void LCD_Test_Blocks(void)
-{
-	ILI9486_Color_t clr[] = { ILI9486_RED, ILI9486_GREEN, ILI9486_BLUE,
-		ILI9486_CYAN, ILI9486_MAGENTA, ILI9486_YELLOW };
-	uint16_t bw = lcd.width / 3, bh = lcd.height / 2;
-	for (int r = 0; r < 2; r++)
-		for (int c = 0; c < 3; c++) {
-			uint16_t x = c * bw, y = r * bh;
-			ILI9486_FillRectangle(x, y, bw, bh, clr[r * 3 + c]);
-			ILI9486_DrawLine(x, y, x + bw - 1, y, ILI9486_WHITE);
-			ILI9486_DrawLine(x, y + bh - 1, x + bw - 1, y + bh - 1, ILI9486_WHITE);
-			ILI9486_DrawLine(x, y, x, y + bh - 1, ILI9486_WHITE);
-			ILI9486_DrawLine(x + bw - 1, y, x + bw - 1, y + bh - 1, ILI9486_WHITE);
-		}
-}
-
-static void LCD_Test_Text(void)
-{
-	ILI9486_FillScreen(ILI9486_BLACK);
-	ILI9486_DrawString(10, 10, "RGB666 Text Test", &Font_11x18, ILI9486_WHITE, ILI9486_BLACK);
-	ILI9486_DrawString(10, 40, "Font_11x18: ABC abc 123", &Font_11x18, ILI9486_CYAN, ILI9486_BLACK);
-	ILI9486_DrawString(10, 70, "Font_7x10 slow:", &Font_7x10, ILI9486_YELLOW, ILI9486_BLACK);
-	ILI9486_DrawString(10, 85, "The quick brown fox jumps", &Font_7x10, ILI9486_GREEN, ILI9486_BLACK);
-	ILI9486_DrawString(10, 100,"over the lazy dog 012345", &Font_7x10, ILI9486_GREEN, ILI9486_BLACK);
-	ILI9486_DrawString(10, 120,"Font_7x10 FAST:", &Font_7x10, ILI9486_YELLOW, ILI9486_BLACK);
-	ILI9486_DrawStringFast(10, 135,"THE QUICK BROWN FOX JUMPS", &Font_7x10, ILI9486_CYAN, ILI9486_BLACK);
-	ILI9486_DrawStringFast(10, 150,"OVER THE LAZY DOG 6789!@", &Font_7x10, ILI9486_CYAN, ILI9486_BLACK);
-	ILI9486_DrawLine(8, 8, lcd.width - 2, 8, ILI9486_WHITE);
-	ILI9486_DrawLine(8, lcd.height - 2, lcd.width - 2, lcd.height - 2, ILI9486_WHITE);
-	ILI9486_DrawLine(8, 8, 8, lcd.height - 2, ILI9486_WHITE);
-	ILI9486_DrawLine(lcd.width - 2, 8, lcd.width - 2, lcd.height - 2, ILI9486_WHITE);
-}
-
-static void LCD_Test_Gradient(void)
-{
-	for (int i = 0; i < 16; i++) {
-		uint8_t ch = (uint8_t)((i * 255) / 15);
-		ILI9486_FillRectangle(i * (lcd.width / 16), 0, lcd.width / 16 + 1, lcd.height / 3,
-			ILI9486_COLOR(ch, 0, 0));
-		ILI9486_FillRectangle(i * (lcd.width / 16), lcd.height / 3, lcd.width / 16 + 1, lcd.height / 3,
-			ILI9486_COLOR(0, ch, 0));
-		ILI9486_FillRectangle(i * (lcd.width / 16), 2 * lcd.height / 3, lcd.width / 16 + 1, lcd.height / 3,
-			ILI9486_COLOR(0, 0, ch));
-	}
-}
-
-static void LCD_Test_All(void)
-{
-	LCD_Test_ColorBars();     delay_ms(2500);
-	LCD_Test_FillSpeed();     delay_ms(3500);
-	LCD_Test_Checkerboard();  delay_ms(2000);
-	LCD_Test_Lines();         delay_ms(2500);
-	LCD_Test_Blocks();        delay_ms(3000);
-	LCD_Test_Text();          delay_ms(3000);
-	LCD_Test_Gradient();      delay_ms(3000);
-	ILI9486_FillScreen(ILI9486_BLACK);
-	ILI9486_DrawString(20, 220, "Tests complete!", &Font_11x18, ILI9486_GREEN, ILI9486_BLACK);
-	delay_ms(2000);
-}
-
-static void LCD_Animation_Rainbow(void)
-{
-#if ILI9486_PIXFMT == ILI9486_PIXFMT_RGB666
-	for (int i = 0; i < 32; i++) {
-		uint32_t color;
-		uint8_t phase = (uint8_t)((i * 6) / 32);
-		uint8_t t = (uint8_t)(((i * 6) % 32) * 255 / 32);
-		uint8_t a = 255 - t, bv = t;
-		switch (phase) {
-			case 0: color = ILI9486_COLOR(255, bv, 0); break;
-			case 1: color = ILI9486_COLOR(a, 255, 0); break;
-			case 2: color = ILI9486_COLOR(0, 255, bv); break;
-			case 3: color = ILI9486_COLOR(0, a, 255); break;
-			case 4: color = ILI9486_COLOR(bv, 0, 255); break;
-			default: color = ILI9486_COLOR(255, 0, a); break;
-		}
-		ILI9486_FillScreen(color);
-		ILI9486_DrawString(10, 220, "RGB666 Animation", &Font_11x18, ILI9486_WHITE, ILI9486_BLACK);
-		GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_13);
-		delay_ms(200);
-	}
-#else
-	ILI9486_Color_t clr[] = { ILI9486_RED, ILI9486_GREEN, ILI9486_BLUE, ILI9486_CYAN,
-							  ILI9486_MAGENTA, ILI9486_YELLOW, ILI9486_ORANGE };
-	for (int i = 0; ; i = (i + 1) % 7) {
-		ILI9486_FillScreen(clr[i]);
-		GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_13);
-		delay_ms(300);
-	}
-#endif
-}
-
-static void LCD_GPIO_Init(void)
-{
-    GPIO_Handle_t h = {0};
-
-    /* PB0 = D/CX, PB1 = RST, PB2 = CS, PB5 = WR, PB4 = RD */
-    h.pGPIOx = GPIOB;
-    h.GPIO_PinConfig.GPIO_PinMode   = GPIO_MODE_OUT;
-    h.GPIO_PinConfig.GPIO_PinOPType = GPIO_OP_TYPE_PP;
-    h.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_PIN_PU;
-    h.GPIO_PinConfig.GPIO_PinSpeed  = GPIO_SPEED_HIGH;
-
-    h.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_0;  GPIO_Init(&h);
-    h.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_1;  GPIO_Init(&h);
-    h.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_2;  GPIO_Init(&h);
-    h.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_5;  GPIO_Init(&h);
-    h.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_4;  GPIO_Init(&h);
-
-    /* PD0-PD7 = data bus DB[7:0] */
-    h.pGPIOx = GPIOD;
-    for (uint8_t p = 0; p < 8; p++) {
-        h.GPIO_PinConfig.GPIO_PinNumber = p;
-        GPIO_Init(&h);
-    }
-
-    /*
-     * ODR reset value = 0, nên ngay sau GPIO_Init() các chân điều khiển
-     * đang ở mức LOW (CS được chọn, WR/RD đang strobe, RST đang giữ reset)
-     * cho tới khi có lệnh ghi đầu tiên. Đặt trạng thái nghỉ ngay để tránh
-     * khoảng thời gian CS/WR ở mức không xác định trước ILI9486_Init().
-     */
-    GPIOB->BSRR = (1u << GPIO_PIN_NO_2)   /* CS  = 1 : chưa chọn LCD */
-                | (1u << GPIO_PIN_NO_5)   /* WR  = 1 : nghỉ          */
-                | (1u << GPIO_PIN_NO_4)   /* RD  = 1 : không đọc     */
-                | (1u << GPIO_PIN_NO_1);  /* RST = 1 : không reset   */
-}
-
-static void LCD_Config(void)
-{
-    lcd.data_port = GPIOD;  lcd.data_pin_offset = 0;
-    lcd.cs_port   = GPIOB;  lcd.cs_pin   = GPIO_PIN_NO_2;
-    lcd.dc_port   = GPIOB;  lcd.dc_pin   = GPIO_PIN_NO_0;
-    lcd.wr_port   = GPIOB;  lcd.wr_pin   = GPIO_PIN_NO_5;
-    lcd.rd_port   = GPIOB;  lcd.rd_pin   = GPIO_PIN_NO_4;
-    lcd.rst_port  = GPIOB;  lcd.rst_pin  = GPIO_PIN_NO_1;
-
-    ILI9486_Init();
-    ILI9486_SetRotation(1);  /* landscape */
-}
 
 void Button_handler(uint8_t line)
 {
@@ -876,96 +411,20 @@ int main(void) {
 	SystemClock_Config();   
 	SysTick_1ms_Init();
 	MX_GPIO_Init();
-	MX_SPI_Init();
+	//MX_SPI_Init();
+	MX_I2C_Init();
 	IRQ_Init();
 
-	/* Hardware bring-up LIS3DSH. Không dùng UART/serial, xem biến global bằng debugger. */
-	lis3dsh_status_code = LIS3DSH_Hardware_Init();
-	if (lis3dsh_status_code != STATUS_OK) {
-		GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_14);
-	}
-
-	//  EXTI_RegisterCallback(0,Button_handler);
-
-	// MX_MCO2_Init();
-
-
-	//LCD_GPIO_Init();
-	//LCD_Config();
-
-	//GP22_TestCommunication();
-	/* Chạy bộ test LCD */
-	//LCD_Test_All();
-	/* For register reads: send command, discard command-phase RX, then auto-dummy to receive. */
-	//status1 = SPI_TransmitReceive_IT(&hspi1, tx_buf2, sizeof(tx_buf2), rx_buf, 1);
-
-
-//
-//	spi_txrx_done = 0U;
-//	SPI_ChipSelect(&hspi1, ENABLE);
-//
-//	/* Queue RX before SPI1 IRQ can complete the 1-byte TX. */
-//	DRV_NVIC_DisableIRQ(SPI1_IRQn);
-//	status1 = SPI_Transmit_IT(&hspi1, tx_buf2, sizeof(tx_buf2));
-//	status2 = SPI_Receive_IT(&hspi1, rx_buf, 1U);
-//	DRV_NVIC_EnableIRQ(SPI1_IRQn);
-//
-//	if ((status1 != STATUS_OK) || (status2 != STATUS_OK))
-//	{
-//		SPI_ChipSelect(&hspi1, DISABLE);
-//	}
-//
-//	while (spi_txrx_done == 0U) { }
-//	spi_txrx_done = 0U;
-//
-//	/* GP22 is on SPI2: reset/write/read must all use hspi2, not hspi1. */
-//	SPI_ChipSelect(&hspi2, ENABLE);
-//	status1 = SPI_Transmit_IT(&hspi2, &reset_cmd, 1U);
-//	while (hspi2.ITMode != SPI_IT_MODE_NONE) { }
-//	SPI_ChipSelect(&hspi2, DISABLE);
-//	delay_ms(10);
-//
-//	SPI_ChipSelect(&hspi2, ENABLE);
-//	status1 = SPI_Transmit_IT(&hspi2, tx_buf1, sizeof(tx_buf1));
-//	while (hspi2.ITMode != SPI_IT_MODE_NONE) { }
-//	SPI_ChipSelect(&hspi2, DISABLE);
-//	delay_ms(1);
-
-	
-
-//	uint8_t opcode = GP22_OPCODE_READ_REG(5);
-//
-//	DRV_NVIC_DisableIRQ(SPI2_IRQn);
-//	status1 = SPI_Transmit(&hspi2,&opcode ,1 ,1000);
-//	status2 = SPI_Receive_IT(&hspi2, (rx_buf + 1), 1U);
-//	DRV_NVIC_EnableIRQ(SPI2_IRQn);
-//
-//	if ((status1 != STATUS_OK) || (status2 != STATUS_OK))
-//	{
-//		SPI_ChipSelect(&hspi2, DISABLE);
-//	}
-//
-//	while (spi_txrx_done == 0U) { }
-
-//
-//	delay_ms(1000);
-
 	while (1) {
-		if (lis3dsh_status_code == STATUS_OK) {
-			LIS3DSH_Hardware_Poll();
-			delay_ms(100U);
-		} else {
-			/* Lỗi init/bus/WHO_AM_I: LED cam toggle và thử init lại. */
-			GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_14);
-			delay_ms(500U);
-			lis3dsh_status_code = LIS3DSH_Hardware_Init();
-		}
+		GPIO_Toggle_Pin(&hgpiod, GPIO_PIN_NO_13);
+			//status1=I2C_MasterSendData(&hi2c1, (uint8_t *)"hello lucas", strlen("hello lucas"), 0x68, I2C_STOP);
+			status1=I2C_MemReadData(&hi2c1, 0x68, 0x75,(rx_buf+1), 1);
+		delay_ms(200);
 	}
-
 }
 
 
-/*-------------------------------------------------------------------------------------*/
+/*-----------------Mx_GPIO_Init-------------*/
 
 void MX_GPIO_Init()
 {
@@ -1001,6 +460,8 @@ void MX_GPIO_Init()
     /* PE3/PE4 đang dùng làm software CS, trạng thái idle phải HIGH. */
     GPIOE->BSRR = (1u << GPIO_PIN_NO_3) | (1u << GPIO_PIN_NO_4);
 }
+
+/*-----------------Mx_SPI_Init-------------*/
 void MX_SPI_Init()
 {
 	hspi1 = (SPI_Handle_t){0};
@@ -1032,6 +493,40 @@ void MX_SPI_Init()
 	hspi2.CS_Pin=GPIO_PIN_NO_4;
 	SPI_GpioConfig(hspi2.pSPIx);
 	SPI_Init(&hspi2);
+}
+
+/**
+ * @brief Default I2C1 setup: PB6=SCL, PB7=SDA (AF4, open-drain, pull-up),
+ *        Standard-mode 100kHz, ACK enabled, own address 0x33.
+ *        Override this weak function when a different bus/pin/config is needed.
+ */
+void MX_I2C_Init(void)
+{
+	GPIO_Handle_t Gpio = {0};
+
+	hi2c1 = (i2c_driver_t){0};
+	hi2c1.pI2Cx = I2C1;
+	hi2c1.I2CConfig.I2C_SCLSpeed      = I2C_SCL_SPEED_SM;
+	hi2c1.I2CConfig.I2C_DeviceAddress = 0x33U;
+	hi2c1.I2CConfig.I2C_ACKControl    = I2C_ACK_ENABLE;
+	hi2c1.I2CConfig.I2C_FMDutyCycle    = I2C_FM_DUTY_2;
+
+	/* PB6=SCL, PB7=SDA, AF4, open-drain, pull-up */
+	GPIO_PeriClockControl(GPIOB, ENABLE);
+	Gpio.pGPIOx = GPIOB;
+	Gpio.GPIO_PinConfig.GPIO_PinMode         = GPIO_MODE_ALTFN;
+	Gpio.GPIO_PinConfig.GPIO_PinOPType       = GPIO_OP_TYPE_OD;
+	Gpio.GPIO_PinConfig.GPIO_PinPuPdControl  = GPIO_PIN_PU;
+	Gpio.GPIO_PinConfig.GPIO_PinSpeed        = GPIO_SPEED_HIGH;
+	Gpio.GPIO_PinConfig.GPIO_PinAltFunMode   = AF4;
+
+	Gpio.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_6;
+	GPIO_Init(&Gpio);
+
+	Gpio.GPIO_PinConfig.GPIO_PinNumber = GPIO_PIN_NO_9;
+	GPIO_Init(&Gpio);
+
+	I2C_Init(&hi2c1);
 }
 
 //void EXTI0_IRQCallback(uint8_t GPIO_PinNumber)
