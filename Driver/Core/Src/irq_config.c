@@ -198,10 +198,10 @@ void IRQ_Init(void)
 
     /* ===== I2C Interrupts ===== */
     // I2C1
-    // DRV_NVIC_SetPriority(I2C1_EV_IRQn, 7, 0);
-    // DRV_NVIC_EnableIRQ(I2C1_EV_IRQn);
-    // DRV_NVIC_SetPriority(I2C1_ER_IRQn, 7, 0);
-    // DRV_NVIC_EnableIRQ(I2C1_ER_IRQn);
+    DRV_NVIC_SetPriority(I2C1_EV_IRQn, 7, 0);
+    DRV_NVIC_EnableIRQ(I2C1_EV_IRQn);
+    DRV_NVIC_SetPriority(I2C1_ER_IRQn, 7, 0);
+    DRV_NVIC_EnableIRQ(I2C1_ER_IRQn);
 
     // I2C2
     // DRV_NVIC_SetPriority(I2C2_EV_IRQn, 7, 0);

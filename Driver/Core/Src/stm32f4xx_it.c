@@ -1,6 +1,7 @@
 #include "stm32f4xx_it.h"
 #include "exti_driver.h"
 #include "spi_driver.h"
+#include "i2c_driver.h"
 
 volatile uint32_t uwTick;  /* 1ms counter for delay_ms */
 
@@ -156,4 +157,14 @@ void SPI3_IRQHandler(void)
     while (1) {
         /* SPI3 chưa có handle được khai báo. Khai báo hspi3 rồi gọi SPI_IRQHandling(&hspi3). */
     }
+}
+
+void I2C1_EV_IRQHandler(void)
+{
+    I2C_EV_IRQHandling(&hi2c1);
+}
+
+void I2C1_ER_IRQHandler(void)
+{
+    I2C_ER_IRQHandling(&hi2c1);
 }

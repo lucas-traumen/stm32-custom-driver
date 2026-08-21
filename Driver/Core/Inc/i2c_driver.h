@@ -68,6 +68,29 @@ extern "C" {
 #define FLAG_I2C_SR2_DUALF     I2C_FLAG_SR2(I2C_SR2_DUALF)
 
 /* --------------------------------------------------------------------------
+ * I2C interrupt transfer states
+ * -------------------------------------------------------------------------- */
+#define I2C_STATE_READY         0U
+#define I2C_STATE_BUSY_TX       1U
+#define I2C_STATE_BUSY_RX       2U
+
+/* --------------------------------------------------------------------------
+ * I2C error codes
+ * -------------------------------------------------------------------------- */
+#define I2C_ERROR_NONE          0U
+#define I2C_ERROR_AF            (1U << 0U)
+#define I2C_ERROR_BERR          (1U << 1U)
+#define I2C_ERROR_ARLO          (1U << 2U)
+#define I2C_ERROR_OVR           (1U << 3U)
+
+/* --------------------------------------------------------------------------
+ * I2C event codes for callback
+ * -------------------------------------------------------------------------- */
+#define I2C_EVENT_TX_COMPLETE   0U
+#define I2C_EVENT_RX_COMPLETE   1U
+#define I2C_EVENT_ERROR         2U
+
+/* --------------------------------------------------------------------------
  * Driver structures
  * -------------------------------------------------------------------------- */
 typedef struct
@@ -78,10 +101,26 @@ typedef struct
     uint8_t  I2C_FMDutyCycle;     /* I2C_FM_DUTY_2 / I2C_FM_DUTY_16_9      */
 } I2C_Config_t;
 
-typedef struct
+typedef struct i2c_driver_t i2c_driver_t;
+
+typedef void (*I2C_Callback_t)(i2c_driver_t *pI2CDriver, uint8_t AppEvent);
+
+typedef struct i2c_driver_t
 {
     I2C_TypeDef  *pI2Cx;          /* I2C1 / I2C2 / I2C3                    */
     I2C_Config_t I2CConfig;
+
+    /* Interrupt transfer context */
+    uint8_t  *pTxBuffer;
+    uint8_t  *pRxBuffer;
+    volatile uint32_t TxLen;
+    volatile uint32_t RxLen;
+    volatile uint32_t RxSize;
+    uint16_t TargetAddr;
+    volatile uint32_t ErrorCode;
+    volatile uint8_t  State;
+    uint8_t  RepeatedStart;
+    I2C_Callback_t Callback;
 } i2c_driver_t;
 
 /* --------------------------------------------------------------------------
@@ -136,6 +175,32 @@ DriverStatus_t I2C_MemReadData(i2c_driver_t *pI2CDriver,
                                uint8_t MemAddr,
                                uint8_t *pRxBuffer,
                                uint16_t Len);
+
+/* --------------------------------------------------------------------------
+ * Non-blocking interrupt transfers (Controller 7-bit)
+ *
+ * The functions return immediately; data flows through the event/error IRQ
+ * handlers. The transaction context lives in the handle. Only I2C_STOP is
+ * supported as end-of-transaction policy; I2C_NO_STOP is rejected until the
+ * chained-transaction state machine exists (see i2c_plan.md).
+ * Callback (if registered) runs inside the IRQ: keep it short.
+ * -------------------------------------------------------------------------- */
+void I2C_RegisterCallback(i2c_driver_t *pI2CDriver, I2C_Callback_t Callback);
+
+DriverStatus_t I2C_MasterSendDataIT(i2c_driver_t *pI2CDriver,
+                                    uint8_t *pTxBuffer,
+                                    uint32_t Len,
+                                    uint16_t TargetAddr,
+                                    uint8_t RepeatedStart);
+
+DriverStatus_t I2C_MasterReceiveDataIT(i2c_driver_t *pI2CDriver,
+                                       uint8_t *pRxBuffer,
+                                       uint32_t Len,
+                                       uint16_t TargetAddr,
+                                       uint8_t RepeatedStart);
+
+void I2C_EV_IRQHandling(i2c_driver_t *pI2CDriver);
+void I2C_ER_IRQHandling(i2c_driver_t *pI2CDriver);
 
 /* --------------------------------------------------------------------------
  * Board-level init (weak). Declared here so any module can call it; the

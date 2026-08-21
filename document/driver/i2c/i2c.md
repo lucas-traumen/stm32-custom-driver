@@ -5,14 +5,18 @@
 1. [Các mode của I2C](#1-các-mode-của-i2c)
 2. [I2C Physical Layer](#2-i2c-physical-layer)
 3. [I2C Protocol](#3-i2c-protocol)
+   - [3.3 Clock synchronization & arbitration](#33-clock-synchronization--arbitration--tranh-chấp-giữa-nhiều-controller)
    - [3.4 Clock stretching](#34-clock-stretching)
    - [3.5 Electrical specifications & pullup resistor sizing](#35-electrical-specifications--pullup-resistor-sizing)
      - [b1) Tính tRISE → RP(max)](#b1-tính-trise--rpmax)
-     - [b2) Tính tLOW / tHIGH → fSCL](#b2-tính-tlow--thigh--fscl)
+     - [b2) Tính RP(min)](#b2-tính-rpmin)
+     - [b3) Tính tLOW / tHIGH → fSCL](#b3-tính-tlow--thigh--fscl)
 4. [Communication Frames](#4-communication-frames)
 5. [Nâng cao I2C](#5-nâng-cao-i2c)
    - [5.1 Reserved addresses (địa chỉ dành riêng)](#51-reserved-addresses-địa-chỉ-dành-riêng)
    - [5.2 I²C buffer (bộ đệm bus)](#52-i2c-buffer-bộ-đệm-bus)
+   - [5.3 10-bit addressing](#53-10-bit-addressing)
+   - [5.4 Bus clear (phục hồi bus bị kẹt)](#54-bus-clear-phục-hồi-bus-bị-kẹt)
 6. [Tài liệu tham khảo](#6-tài-liệu-tham-khảo)
 
 ---
@@ -34,9 +38,9 @@ I2C hỗ trợ nhiều tốc độ truyền nhận, mỗi mode có giới hạn 
 ### Lưu ý khi chọn mode
 
 - **Sm / Fm / Fm+** là các mode hai chiều (bidirectional) có cơ chế ACK — **implement gần như giống nhau**, chỉ khác thông số CCR/TRISE và cấu hình `DUTY` bit trong `I2C_CCR`. Cùng dùng chung flow: START → gửi address → data → STOP.
-- **UFm** truyền một chiều, không có ACK nên không an toàn bằng các mode kia — cần xử lý khác.
-- **Hs-mode** cần có bộ khuếch đại/driver riêng trên bus, STM32F4 thường không dùng.
-- Tốc độ thực tế phụ thuộc vào **xung clock nguồn** ( Peripheral Clock PCLK1 cho STM32F4) và **duty cycle** cấu hình trong peripheral. Chi tiết tính CCR/TRISE có trong RM0009 và sẽ có sample code riêng.
+- **UFm** truyền một chiều, không có ACK, dùng push-pull thay vì open-drain nên không an toàn bằng các mode kia — cần xử lý khác.
+- **Hs-mode** (3.4 Mbit/s) có cơ chế riêng theo UM10204 §5.3: controller phát **Hs-mode Controller code** (8 bit, từ `0000 1000` đến `0000 1111`) ở tốc độ F/S để giành bus, sau đó chuyển sang tốc độ cao; SCL dùng thêm **current-source pull-up** (chỉ 1 controller được bật tại một thời điểm) để rút ngắn rise time; trong quá trình truyền Hs **không còn arbitration/clock synchronization**. STM32F4 không hỗ trợ Hs-mode nên tài liệu này không đi sâu.
+- Tốc độ thực tế phụ thuộc vào **xung clock nguồn** ( Peripheral Clock PCLK1 cho STM32F4) và **duty cycle** cấu hình trong peripheral. Chi tiết tính CCR/TRISE có trong RM0090 và sẽ có sample code riêng.
 
 ---
 
@@ -50,14 +54,15 @@ I2C hỗ trợ nhiều tốc độ truyền nhận, mỗi mode có giới hạn 
 
 I2C dùng **2 đường truyền chung** (shared bus) cho mọi thiết bị trên bus:
 
-- **SCL** (Serial Clock) — xung nhịp, do **controller** (master) điều khiển, dùng để clock data vào/ra target.
+- **SCL** (Serial Clock) — xung nhịp, do **controller** (master) tạo ra, dùng để clock data vào/ra target. Ngoại lệ duy nhất: target có thể **kéo SCL xuống LOW** để bắt controller chờ (clock stretching — xem 3.4), hoặc các controller khác cùng kéo SCL khi tranh chấp bus (xem 3.3).
 - **SDA** (Serial Data) — đường data hai chiều, truyền config/code giữa controller và target.
 
 Đặc điểm:
 
 - **Half-duplex**: tại một thời điểm chỉ có 1 thiết bị (controller hoặc target) gửi data trên bus.
-- **Multi-controller + multi-target**: nhiều master và nhiều slave cùng chia sẻ bus. Master bắt đầu/kết thúc giao tiếp → loại trừ bus contention. Mỗi target có một **địa chỉ (address) duy nhất** 7-bit.
-- Cả 2 đường SDA + SCL đều cần **pullup resistor** lên VDD (do kết nối **open-drain**).
+- **Multi-controller + multi-target**: nhiều master và nhiều slave cùng chia sẻ bus. Master bắt đầu/kết thúc giao tiếp → loại trừ bus contention.
+- **Địa chỉ target**: mỗi target cần một địa chỉ 7-bit (hoặc 10-bit) **không trùng nhau trong cùng một segment bus** để truy cập độc lập. Đây là yêu cầu thiết kế hệ thống — giao thức không tự ngăn hai thiết bị trùng địa chỉ cùng tồn tại; nếu trùng, cả hai cùng ACK và gây xung đột (xem 5.2-e).
+- Cả 2 đường SDA + SCL đều cần **pullup resistor** lên VDD (do kết nối **open-drain**). Ngoại lệ theo UM10204 §3.1.1: hệ thống **chỉ có 1 controller và không có thiết bị nào stretch clock** thì SCL của controller có thể dùng push-pull; còn SDA vẫn luôn open-drain.
 
 So với SPI (full-duplex, 4 dây: SCLK + 2 data + CS), I2C đánh đổi tốc độ/độ phức tạp để chỉ dùng 2 dây.
 
@@ -127,15 +132,23 @@ START và STOP là 2 điều kiện đặc biệt do **controller** (master) t�
 | **STOP**  | Low → High           | Nhả bus, kết thúc |
 
 **START condition** (controller chiếm bus):
-1. Bus idle: cả SDA và SCL đều HIGH.
-2. Controller kéo **SDA xuống LOW** trước.
+1. Bus free: cả SDA và SCL đều HIGH (đã chờ đủ thời gian `tBUF` từ STOP trước đó).
+2. Controller kéo **SDA xuống LOW** trước, giữ ít nhất `tHD;STA`.
 3. Sau đó kéo **SCL xuống LOW**.
 → Khoảng chuyển high→low của SDA khi SCL đang HIGH = START. Sau đó SCL kéo low để bắt đầu clock bit đầu tiên, ép các controller khác phải giữ giao tiếp (bus đã bị chiếm).
 
 **STOP condition** (controller nhả bus):
 1. Controller nhả **SCL lên HIGH** trước.
-2. Sau đó nhả **SDA lên HIGH**.
-→ Khoảng chuyển low→high của SDA khi SCL đang HIGH = STOP. Bus trở về idle (cả 2 đường HIGH).
+2. Sau đó nhả **SDA lên HIGH** (giữ ít nhất `tSU;STO` giữa cạnh lên SCL và cạnh lên SDA).
+→ Khoảng chuyển low→high của SDA khi SCL đang HIGH = STOP. Bus trở về free (cả 2 đường HIGH).
+
+**Repeated START (Sr)** — START thứ hai trong cùng một giao tiếp:
+1. Controller đã chiếm bus (SDA đang LOW hoặc vừa nhả sau bit ACK), SCL đang LOW.
+2. Controller nhả SDA lên HIGH khi SCL vẫn LOW, chờ `tSU;STA`.
+3. Nhả SCL lên HIGH, giữ `tHD;STA`, rồi kéo SDA xuống LOW khi SCL đang HIGH.
+→ Sr có cùng dạng sóng với START, chỉ khác là xảy ra khi **bus đang busy** (controller đã chiếm bus) thay vì bus free. Sr cho phép bắt đầu message mới **không nhả bus** — dùng khi muốn đổi hướng truyền (write REG_ADDR rồi read) hoặc chuyển sang target khác mà không cho thiết bị khác xen vào giữa.
+
+Sau STOP, controller phải chờ thời gian bus free tối thiểu **`tBUF`** (4.7 µs Standard / 1.3 µs Fast / 0.5 µs Fm+) trước khi phát START kế tiếp.
 
 ### 3.2 Logical Ones and Zeros
 
@@ -146,25 +159,34 @@ I2C truyền data theo bit, dùng SDA làm đường data và SCL làm xung cloc
 - **Logical 1**: controller **nhả SDA** (NMOS OFF) → pullup resistor kéo đường lên mức HIGH.
 - **Logical 0**: controller **kéo SDA xuống** (NMOS ON) → đường ở mức LOW gần GND.
 
-**Khi nào lấy mẫu (sample) / khi nào đổi SDA:**
+**Khi nào data hợp lệ / khi nào đổi SDA** (UM10204 §3.1.3 — data validity):
 
-- Data được **lấy mẫu tại cạnh lên của SCL** (rising edge), và giá trị SDA **phải giữ nguyên** từ cạnh lên đến cạnh xuống của SCL trong cùng một bit.
-- SDA **chỉ được phép đổi khi SCL đang LOW** để chuẩn bị bit kế tiếp.
-- Nếu SDA **đổi khi SCL đang HIGH** → đây không phải data bit, mà là **điều kiện điều khiển** (START hoặc STOP — xem 3.1).
+- Spec quy định theo **mức**, không quy định theo cạnh: **SDA phải ổn định trong toàn bộ khoảng SCL HIGH**. SDA **chỉ được phép đổi khi SCL đang LOW** (sau cạnh xuống của SCL, với set-up/hold time theo Table 11).
+- Nếu SDA **đổi khi SCL đang HIGH** → đây không phải data bit, mà là **điều kiện điều khiển** (START, STOP hoặc repeated START — xem 3.1).
+- Việc "lấy mẫu tại cạnh lên SCL" là **chi tiết implementation** của phần cứng số (nhiều peripheral dùng cạnh lên làm mốc sample nội bộ), không phải định nghĩa của protocol. Điều bắt buộc duy nhất là SDA ổn định suốt pha HIGH để bất kể receiver sample lúc nào trong pha đó cũng đọc đúng một giá trị.
 
-> Quy tắc nhớ: **SCL HIGH = SDA phải đứng yên** (lúc này mới lấy mẫu data); **SCL LOW = SDA được đổi** (chuẩn bị bit tiếp theo). Phá quy tắc = phát START/STOP.
+> Quy tắc nhớ: **SCL HIGH = SDA phải đứng yên**; **SCL LOW = SDA được đổi** (chuẩn bị bit tiếp theo). Đổi SDA khi SCL HIGH = phát START/STOP/Sr.
 
-### 3.3 Bus arbitration — tranh chấp giữa 2 controller
+**Chống nhiễu** không dựa vào việc "giữ SCL HIGH lâu hơn" mà dựa vào: ngưỡng input có **hysteresis** (noise margin `VnL = 0.1×VDD`, `VnH = 0.2×VDD` theo Table 11), SDA ổn định suốt pha HIGH, pull-up đúng giá trị và layout tốt. Nếu bus nhiễu, giải pháp là giảm `fSCL` hoặc cải thiện phần cứng — không có cơ chế protocol nào "kéo dài SCL HIGH để chống nhiễu".
 
-I2C cho phép **nhiều controller** cùng nằm trên bus. Khi 2 controller cùng muốn chiếm bus cùng lúc, phải có cơ chế phân giải mà không làm hỏng giao tiếp. Nhờ **open-drain + wired-AND** (đã nói ở 2.3), I2C giải quyết được bằng **clock synchronization** + **arbitration**.
+### 3.3 Clock synchronization & arbitration — tranh chấp giữa nhiều controller
+
+I2C cho phép **nhiều controller** cùng nằm trên bus. Khi 2 controller cùng muốn chiếm bus, phải có cơ chế phân giải mà không làm hỏng giao tiếp. Nhờ **open-drain + wired-AND** (đã nói ở 2.3), I2C giải quyết bằng **hai cơ chế riêng biệt** (UM10204 §3.1.7 và §3.1.8):
+
+| Cơ chế | Diễn ra trên | Vai trò |
+|--------|--------------|---------|
+| **Clock synchronization** | SCL | Đồng bộ nhịp clock giữa các controller |
+| **Arbitration** | SDA (khi SCL HIGH) | Quyết định controller nào được quyền tiếp tục truyền |
+
+Hai cơ chế này **chỉ tồn tại trong hệ thống multi-controller** và **target không tham gia** vào quá trình arbitration. Trong hệ thống chỉ có 1 controller (đa số ứng dụng STM32 đơn giản) thì cả hai không bao giờ kích hoạt.
 
 #### a) Tổng quan tranh chấp bus
 
 ![I2C Bus Contention With Multiple Controllers](image/image8.png)
 
-Khi 2 controller cùng cố chiếm bus, cần cơ chế phân giải mà không làm gián đoạn giao tiếp. I2C dùng wired-AND của SDA và SCL (do open-drain) để đồng bộ và phân giải.
+Hai controller có thể phát START gần như cùng lúc (trong cùng khoảng `tHD;STA`) → cả hai START đều hợp lệ trên bus → cần phân giải xem ai truyền tiếp.
 
-#### b) Clock synchronization (đồng bộ xung)
+#### b) Clock synchronization (đồng bộ xung — §3.1.7)
 
 SCL cũng là open-drain → **wired-AND**: SCL chỉ HIGH khi **tất cả** controller đều nhả, và bị LOW ngay khi **một** controller kéo low.
 
@@ -177,59 +199,72 @@ SCL cũng là open-drain → **wired-AND**: SCL chỉ HIGH khi **tất cả** co
 
 ![Clock Sync — SCL Going Low](image/image9.png)
 
-Khi 2 controller cùng phát START, controller nào kéo SCL low **trước** sẽ ép cả bus low ngay lập tức (wired-AND). Controller còn lại phát hiện SCL đã low sớm hơn dự kiến → biết có controller khác.
+Cơ chế theo spec: cạnh xuống của SCL làm các controller **bắt đầu đếm pha LOW** của mình. Controller nào đếm xong pha LOW thì nhả SCL, nhưng nếu controller khác vẫn đang trong pha LOW thì SCL **vẫn bị giữ LOW**. Các controller có pha LOW ngắn hơn rơi vào **trạng thái chờ HIGH** (HIGH wait-state).
 
 ![Clock Sync — SCL Returning High](image/image10.png)
 
-Khi nhả, controller nào giữ SCL low **lâu hơn** sẽ quyết định khi nào bus mới lên high. Mỗi controller phải **monitor SCL thực tế** và chỉ tiếp tục khi SCL thật sự lên high → đồng bộ nhịp clock.
+Khi **tất cả** controller đã đếm xong pha LOW, SCL được nhả và lên HIGH. Lúc này mọi controller bắt đầu đếm **pha HIGH**; controller nào đếm xong pha HIGH **trước** sẽ kéo SCL xuống LOW trước.
 
 ![Clock Sync — Monitoring SCL](image/image11.png)
 
-Controller phải tiếp tục theo dõi SCL: nếu SCL thực tế khác với mức mình mong đợi → phải điều chỉnh. Chu kỳ low = controller có low-period dài nhất; chu kỳ high = controller có high-period ngắn nhất.
+Mỗi controller phải **monitor SCL thực tế** và chỉ tiếp tục khi SCL thật sự đổi mức theo đúng nhịp tổng hợp.
 
 ![Clock Sync — Resulting Wired-AND SCL](image/image12.png)
 
-Kết quả: chu kỳ SCL tổng hợp là "union" của các chu kỳ controller — chậm hơn hoặc bằng mỗi controller đơn lẻ. Clock sync tiếp tục qua mọi chu kỳ cho đến khi một controller thắng arbitration.
+Kết quả (nguyên văn quy tắc §3.1.7):
 
-#### c) Arbitration trên SDA
+> Pha LOW của SCL tổng hợp = pha LOW **dài nhất** trong các controller; pha HIGH = pha HIGH **ngắn nhất**.
+
+Lưu ý: clock synchronization chỉ tạo ra nhịp clock chung — nó **không quyết định ai thắng ai thua**. Việc phân định thắng/thua là của arbitration bên dưới.
+
+#### c) Arbitration trên SDA (§3.1.8)
 
 ![I2C Controller Arbitration](image/image13.png)
 
-Sau khi SCL đã đồng bộ, cả 2 controller truyền data song song trên SDA. SDA cũng là wired-AND → nếu một controller gửi **0** và controller kia gửi **1** cùng lúc, bus sẽ là **0** (0 "thắng").
+Arbitration diễn ra **bit-by-bit trên SDA, trong lúc SCL đang HIGH**:
 
-- Cả 2 controller đều **monitor SDA** trong khi truyền.
-- Khi một controller phát ra **1** nhưng đọc lại thấy SDA đang **0** → biết là có controller khác đang gửi 0 → controller gửi 1 **thua arbitration**, phải **nhả bus** (ngừng truyền) để không phá giao tiếp.
-- Controller gửi 0 tiếp tục truyền bình thường, target không thấy gián đoạn.
+- Mỗi bit, trong khi SCL HIGH, mỗi controller **so sánh mức SDA thực tế trên bus với bit mình vừa phát**.
+- SDA là wired-AND → nếu một controller gửi **0** và controller kia gửi **1** cùng lúc, bus đọc được **0**.
+- Controller nào **phát 1 nhưng đọc được 0** → biết mình **thua arbitration** → **tắt SDA output driver** (nhả bus) để không phá giao tiếp của controller thắng.
+- Controller thắng tiếp tục truyền bình thường; **không mất dữ liệu nào** trong quá trình arbitration. Controller thua có thể tiếp tục tạo xung clock đến hết byte đang truyền, rồi phải **chờ bus free và truyền lại** từ đầu.
+- Nếu hai controller gửi data giống hệt nhau từng bit, arbitration không phát sinh khác biệt — cả hai cùng truyền cho đến khi có bit khác nhau.
+- Trường hợp đặc biệt: một controller có kèm chức năng target mà thua arbitration ngay ở address phase thì có thể chính controller thắng đang address **nó** → nó phải chuyển ngay sang target mode.
 
-Arbitration chỉ kết thúc khi các controller gửi data khác nhau; nếu chúng gửi cùng byte hệt nhau thì không phát sinh tranh chấp và sẽ tiếp tục cho đến khi khác bit. Trong hệ thống chỉ có **1 controller** (như đa số ứng dụng STM32 đơn giản) thì cơ chế này không bao giờ kích hoạt.
+**Điều kiện không xác định (undefined condition):** arbitration đang diễn ra mà một controller phát repeated START hoặc STOP trong khi controller kia vẫn đang gửi data bit — các tổ hợp Sr+data, STOP+data, Sr+STOP đều là undefined. Thiết kế multi-controller phải tránh các tổ hợp này.
+
+Vì quyền bus được quyết định **chỉ bởi address/data** mà các controller gửi, nên không có controller trung tâm và không có thứ tự ưu tiên trên bus.
 
 ### 3.4 Clock stretching
 
-#### a) Clock stretching (target giữ SCL)
+#### a) Clock stretching (target giữ SCL LOW)
 
 ![I2C Target Clock Stretching](image/image14.png)
 
-Bình thường SCL do controller điều khiển. Nhưng có những lúc target cần **chậm lại** và nó sẽ **giữ SCL ở mức low hoặc kéo SCL xuống low sớm** để ép controller phải chờ. Đây là **lần duy nhất target được điều khiển SCL**.
+Bình thường SCL do controller điều khiển. Nhưng có những lúc target cần **chậm lại** và nó sẽ **kéo/giữ SCL ở mức LOW** để ép controller phải chờ. Đây là **lần duy nhất target được tác động lên SCL**.
 
-Theo spec I2C: **không có giới hạn thời gian** target được phép kéo SCL low (các biến thể như SMBus có timeout 35 ms). Hầu hết MCU I2C peripheral (kể cả STM32F4) đều có bit cho phép/không cho phép tính năng này (vd `CLKSTRETCH` trong `I2C_CR1`).
+Định nghĩa theo UM10204 §3.1.9:
 
-Có 2 tình huống stretching phổ biến:
+> Clock stretching pauses a transaction by **holding the SCL line LOW**. The transaction cannot continue until the line is released HIGH again.
 
-**Stretch ở chu kỳ HIGH — để xác thực data:**
+Stretching **luôn biểu hiện là pha LOW của SCL bị kéo dài** — không bao giờ là "giữ SCL HIGH lâu hơn". Lý do vật lý: target nối open-drain nên chỉ có 2 hành động — kéo SCL xuống LOW (NMOS ON) hoặc nhả (NMOS OFF). Target **không thể chủ động giữ đường ở HIGH** (HIGH chỉ tồn tại khi tất cả cùng nhả và pull-up kéo lên), và cũng **không thể ngăn controller kéo SCL xuống LOW**. Đòn bẩy duy nhất của target là giữ LOW: khi controller nhả SCL mong nó lên HIGH mà target vẫn kéo LOW → SCL thực tế vẫn LOW → controller thấy SCL chưa lên → phải chờ.
 
-Target giữ SCL ở mức **HIGH lâu hơn dự kiến** (không nhả SCL low ngay) hoặc kéo SCL xuống low sớm trước khi controller kịp tạo xung clock kế tiếp. Mục đích: cho target thêm thời gian để **xác thực data byte vừa nhận** (kiểm tra parity, viết vào register, chuẩn bị byte trả lời...) trước khi byte kế tiếp được clock ra.
+Clock stretching là **optional**: nhiều target không có SCL driver nên không thể stretch. Theo spec I2C: **không có giới hạn thời gian** target được phép giữ SCL LOW (các biến thể như SMBus có timeout riêng, vd 35 ms). Trên STM32F4, bit `NOSTRETCH` trong `I2C_CR1` điều khiển việc peripheral (ở target mode) có được phép stretch hay không.
 
-→ Trong thực tế, controller không được giả định SCL sẽ nhả low ngay sau khi nó nhả high; phải **monitor SCL thực tế** và chỉ chuyển bit khi SCL thật sự đổi.
+Có 2 mức stretching theo spec:
 
-**Stretch ở chu kỳ ACK — để chờ xử lý:**
+**Byte level — stretch sau khi nhận xong 1 byte (phổ biến nhất):**
 
-Sau khi nhận xong 8 bit data, controller nhả SDA ở clk thứ 9 để target gửi ACK. Target có thể **kéo SCL xuống low tại thời điểm ACK** và giữ low cho đến khi sẵn sàng phản hồi → ép controller phải chờ. Đây là điểm phổ biến nhất của clock stretching vì:
+Target nhận xong 8 bit data + đã ACK, nhưng cần thêm thời gian trước byte kế tiếp. Nó **giữ SCL LOW sau bit ACK** cho đến khi sẵn sàng → controller rơi vào wait-state. Đây là dạng "handshake" tốc độ, dùng khi:
 
-- Target vừa nhận address → cần thời gian để đối chiếu địa chỉ, chuẩn bị mode read/write.
-- Target vừa nhận data byte → cần thời gian ghi vào register nội, hoặc chuẩn bị byte tiếp theo để gửi обратно controller.
+- Target vừa nhận address → cần thời gian đối chiếu địa chỉ, chuẩn bị mode read/write.
+- Target vừa nhận data byte → cần thời gian lưu byte vào buffer/register nội, hoặc chuẩn bị byte tiếp theo để gửi lại controller.
 - Nếu là ADC/DAC → cần thời gian chuyển đổi analog trước khi trả data.
 
-> Controller phải chờ SCL thật sự lên high rồi mới tiếp tục. Nếu cố phát SCL pulse trong khi target đang giữ low → sẽ vi phạm protocol và data bị sai.
+**Bit level — kéo dài pha LOW của từng clock:**
+
+Thiết bị có hardware I2C hạn chế (vd MCU bit-bang) có thể làm chậm bus bằng cách **kéo dài pha LOW của từng xung clock**. Tốc độ của controller tự thích ứng theo nhịp thật của bus.
+
+> Controller phải chờ SCL thật sự lên HIGH rồi mới tiếp tục (đếm tHIGH chỉ bắt đầu khi SCL đọc được HIGH). Nếu cố phát tiếp trong khi target đang giữ LOW → vi phạm timing và data bị sai.
 
 #### b) Phân tích dạng sóng với số liệu
 
@@ -272,18 +307,25 @@ Target **không tạo thêm xung mới** — nó chỉ kéo dài pha LOW của c
 
 #### a) Electrical specifications
 
-Mỗi thiết bị I2C có spec electrical cho SDA/SCL. Bảng dưới là **ví dụ** lấy từ datasheet ADS1119 (TI) — mỗi thiết bị có datasheet riêng, nhưng các thông số chính đều tương tự vì tuân theo cùng I2C spec.
+Bảng dưới trích từ **UM10204 Table 11** — đặc tính chuẩn của bus SDA/SCL cho Sm/Fm/Fm+. Mỗi thiết bị cụ thể ghi thêm ràng buộc riêng trong datasheet của nó; hình bên dưới là ví dụ bảng electrical characteristics trong datasheet một thiết bị thật (ADS1119, TI) để thấy cách các thông số này xuất hiện ngoài thực tế.
 
-![Electrical characteristics — ví dụ ADS1119](image/image15.png)
+![Electrical characteristics — ví dụ datasheet ADS1119 (bảng chuẩn lấy từ UM10204 Table 11)](image/image15.png)
 
 | Thông số | Ý nghĩa                                   | Standard-mode | Fast-mode | Fast-mode+ | Đơn vị |
 |----------|--------------------------------------------|---------------|-----------|------------|--------|
 | `fSCL`   | Tần số SCL                                 | 0–100         | 0–400     | 0–1000     | kHz    |
-| `tr`     | Rise time (cả SDA và SCL)                  | 1000          | 300       | 120        | ns     |
+| `tLOW`   | Pha LOW tối thiểu của SCL                  | 4.7           | 1.3       | 0.5        | µs     |
+| `tHIGH`  | Pha HIGH tối thiểu của SCL                 | 4.0           | 0.6       | 0.26       | µs     |
+| `tr`     | Rise time max (cả SDA và SCL)              | 1000          | 300       | 120        | ns     |
+| `tf`     | Fall time max (cả SDA và SCL)              | 300           | 300       | 120        | ns     |
+| `tBUF`   | Bus free time giữa STOP và START           | 4.7           | 1.3       | 0.5        | µs     |
 | `Cb`     | Tải điện dung tối đa mỗi đường bus        | 400            | 400       | 550        | pF     |
-| `VIL`    | Mức vào LOW (max)                          | 0.3×VCC       | 0.3×VCC   | 0.3×VCC    | V      |
-| `VIH`    | Mức vào HIGH (min)                         | 0.7×VCC       | 0.7×VCC   | 0.7×VCC    | V      |
-| `VOL`    | Mức ra LOW (max, IOL=3 mA)                 | 0.4           | 0.4       | 0.4        | V      |
+| `VIL`    | Mức vào LOW (max)                          | 0.3×VDD       | 0.3×VDD   | 0.3×VDD    | V      |
+| `VIH`    | Mức vào HIGH (min)                         | 0.7×VDD       | 0.7×VDD   | 0.7×VDD    | V      |
+| `VOL`    | Mức ra LOW (max)                           | 0.4           | 0.4       | 0.4        | V      |
+| `IOL`    | Dòng sink tối thiểu phải đạt ở VOL         | 3 mA          | 3 mA      | **20 mA**  | —      |
+
+Lưu ý quan trọng: **`IOL` khác nhau giữa các mode** (UM10204 §7.1) — Standard/Fast yêu cầu sink ≥ 3 mA, nhưng **Fast-mode Plus yêu cầu ≥ 20 mA**. Điều này ảnh hưởng trực tiếp đến `RP(min)` (xem 3.5-b2).
 
 → Spec này là cơ sở để tính pullup resistor (xem 3.5-b dưới) và chọn mode phù hợp với peripheral clock (PCLK1) của MCU.
 
@@ -364,17 +406,28 @@ RP(min) = (VCC − VOL) / IOL
 Trong đó:
 - **VCC** — điện áp nguồn pullup.
 - **VOL** — điện áp thấp tối đa khi chốt mức LOW (tra datasheet, chuẩn I2C quy 0.4 V).
-- **IOL** — dòng sink tối đa mà NMOS hút về GND trong khi vẫn giữ pin ≤ VOL (chuẩn I2C quy 3 mA cho Standard/Fast-mode).
+- **IOL** — dòng sink tối thiểu mà thiết bị phải hút được về GND trong khi vẫn giữ pin ≤ VOL. Theo UM10204 §7.1: **3 mA cho Standard/Fast-mode, 20 mA cho Fast-mode Plus**.
 
 → RP phải **≥ RP(min)**: nhỏ hơn nữa thì mạch không kéo được xuống VOL, ngưỡng logic 0 không hợp lệ và NMOS vượt khả năng dòng sink (nóng/hỏng).
 
 Với mạch ví dụ STM32F4 (VCC = 3.3 V):
 
 ```
-RP(min) = (3.3 − 0.4) / 3 mA = 0.967 kΩ = 967 Ω
+Standard/Fast-mode:  RP(min) = (3.3 − 0.4) / 3 mA  = 0.967 kΩ = 967 Ω
+Fast-mode Plus:      RP(min) = (3.3 − 0.4) / 20 mA = 0.145 kΩ = 145 Ω
 ```
 
-→ Kết hợp b1: **967 Ω ≤ RP ≤ 2.95 kΩ** (Standard-mode, Cb = 400 pF). Chọn giữa khoảng này theo cân bằng: gần RP(min) → rise nhanh nhưng dòng đứng (VCC/RP) lớn; gần RP(max) → tiết kiệm dòng nhưng rise chậm, dễ bị nhiễu.
+→ Kết hợp b1:
+
+| Mode | Cb dùng để tính | RP(min) | RP(max) | Khoảng hợp lệ |
+|------|-----------------|---------|---------|----------------|
+| Standard-mode | 400 pF | 967 Ω | 2.95 kΩ | **967 Ω ≤ RP ≤ 2.95 kΩ** |
+| Fast-mode     | 400 pF | 967 Ω | 0.88 kΩ | **vô nghiệm** (RP(min) > RP(max)) |
+| Fast-mode Plus| 550 pF | 145 Ω | 0.26 kΩ | **145 Ω ≤ RP ≤ 257 Ω** |
+
+Khoảng Fast-mode "vô nghiệm" **không có nghĩa Fast-mode không chạy được** — nó nghĩa là với Cb = 400 pF và sink chỉ 3 mA thì không tồn tại điện trở thụ động nào thỏa cả hai ràng buộc cùng lúc. Thực tế muốn chạy Fm ở Cb cao phải: giảm Cb (layout ngắn, ít thiết bị), dùng thiết bị sink mạnh hơn 3 mA (nhiều linh kiện cho phép), hoặc chấp nhận giảm fSCL. **Luôn kiểm tra khả năng sink thực tế của mọi thiết bị trên bus**, không chỉ giá trị tối thiểu của mode.
+
+Chọn RP trong khoảng hợp lệ theo cân bằng: gần RP(min) → rise nhanh nhưng dòng đứng (VCC/RP) lớn; gần RP(max) → tiết kiệm dòng nhưng rise chậm, dễ bị nhiễu.
 
 #### b3) Tính tLOW / tHIGH → fSCL
 
@@ -384,15 +437,15 @@ T_SCL = tLOW + tHIGH
 fSCL = 1 / T_SCL
 ```
 
-Spec I2C yêu cầu:
+Spec I2C yêu cầu (giá trị min từ Table 11):
 
-| Mode            | tLOW min (µs) | tHIGH min (µs) | T_SCL min (µs) | fSCL max (kHz) |
-|-----------------|---------------|----------------|-----------------|-----------------|
-| Standard-mode   | 4.7           | 4.0            | 8.7             | ~115 (cap 100) |
-| Fast-mode       | 1.3           | 0.6            | 1.9             | ~526 (cap 400) |
-| Fast-mode Plus  | 0.5           | 0.26           | 0.76            | ~1316 (cap 1000)|
+| Mode            | tLOW min (µs) | tHIGH min (µs) | T_SCL min (µs) | 1/T_SCL min  | fSCL max theo spec |
+|-----------------|---------------|----------------|-----------------|---------------|---------------------|
+| Standard-mode   | 4.7           | 4.0            | 8.7             | ~115 kHz      | **100 kHz**         |
+| Fast-mode       | 1.3           | 0.6            | 1.9             | ~526 kHz      | **400 kHz**         |
+| Fast-mode Plus  | 0.5           | 0.26           | 0.76            | ~1316 kHz     | **1000 kHz**        |
 
-→ Tổng tLOW + tHIGH min < T_SCL của fSCL max → có "biên độ" cho tRISE + tLOW/thIGH thêm dư. Nhưng nếu tRISE quá lớn → ăn vào tHIGH → vi phạm tHIGH min.
+Lưu ý: `fSCL max` là **giới hạn độc lập** của spec (100/400/1000 kHz), không phải suy ra từ tLOW+tHIGH. Tổng tLOW+tHIGH min nhỏ hơn chu kỳ của fSCL max là để dành chỗ cho **rise time và fall time** của bus thực tế — xung SCL thực không phải vuông lý tưởng, cạnh lên/xuống chiếm một phần chu kỳ. Nếu `tr` quá lớn → ăn vào pha HIGH → vi phạm tHIGH min. Vì vậy khi ước lượng fSCL khả dụng trên bus thật, phải tính cả `tr`/`tf` và timing thực tế của controller, không chỉ cộng hai giá trị min.
 
 **Trong STM32F4**, tLOW/tHIGH được tính từ **PCLK1** (xung clock APB1 cấp cho I2C peripheral) và **CCR** (thanh ghi `I2C_CCR`):
 
@@ -458,7 +511,7 @@ Có 2 loại frame chính:
 
 ### 4.2 Address frame (7-bit + R/W + ACK)
 
-Mỗi target có 1 địa chỉ 7-bit duy nhất → 128 địa chỉ (nhưng có reserved, thực tế ít hơn). Address frame gồm 9 bit:
+Mỗi target có 1 địa chỉ 7-bit (hoặc 10-bit — xem 5.3) → 128 địa chỉ 7-bit (nhưng có reserved, thực tế ít hơn). Address frame gồm 9 bit:
 
 | Bit 7 | Bit 6 | Bit 5 | Bit 4 | Bit 3 | Bit 2 | Bit 1 | Bit 0 |
 |-------|-------|-------|-------|-------|-------|-------|-------|
@@ -466,15 +519,31 @@ Mỗi target có 1 địa chỉ 7-bit duy nhất → 128 địa chỉ (nhưng c�
 
 - 7 bit cao (A6:A0) = địa chỉ target.
 - Bit thấp nhất = R/W: `1` = Read, `0` = Write.
-- Sau 8 bit, controller **nhả SDA** ở clk thứ 9 để target kéo SDA xuống = **ACK** (xác nhận địa chỉ đúng). Nếu không có target nào ACK → bit ở mức HIGH = **NACK** → controller phát STOP.
+- Sau 8 bit, **transmitter nhả SDA** ở clk thứ 9 để receiver kéo SDA xuống = **ACK** (xác nhận địa chỉ đúng). Nếu không có target nào ACK → bit ở mức HIGH = **NACK** → controller phát STOP hoặc repeated START (xem 4.3).
 
-### 4.3 Data frame (8-bit + ACK)
+### 4.3 Data frame (8-bit + ACK) và quy tắc ACK/NACK tổng quát
 
 Sau address frame là 1 hoặc nhiều data frame:
 
 - Mỗi data frame = **8 bit data** (MSB trước) + 1 bit ACK ở clk thứ 9.
 - **Write**: target kéo SDA low để ACK mỗi byte nhận được.
-- **Read**: controller kéo SDA low để ACK mỗi byte nhận được. Controller gửi **NACK** ở byte cuối cùng để báo "đủ rồi, ngừng gửi đi" → sau đó controller phát STOP.
+- **Read**: controller kéo SDA low để ACK mỗi byte nhận được. Controller gửi **NACK** ở byte cuối cùng để báo "đủ rồi, ngừng gửi đi" → sau đó controller phát STOP (hoặc repeated START nếu muốn bắt đầu transfer mới).
+
+**Quy tắc tổng quát theo UM10204 §3.1.6** (đúng cho mọi hướng truyền):
+
+- **Controller tạo mọi xung clock**, kể cả xung clock thứ 9 của bit ACK.
+- Ở clk thứ 9: **transmitter nhả SDA**, **receiver quyết định mức**: kéo SDA LOW và giữ ổn định suốt pha HIGH = **ACK**; để SDA HIGH = **NACK**.
+- Vậy trong controller-write: target là receiver → target phát ACK/NACK. Trong controller-read: controller là receiver → **controller phát ACK/NACK**, còn target (transmitter) nhả SDA.
+
+**5 điều kiện dẫn đến NACK** (§3.1.6):
+
+1. Không có receiver nào trên bus có địa chỉ được gửi → không ai ACK.
+2. Receiver đang bận thực hiện chức năng real-time, chưa sẵn sàng giao tiếp.
+3. Trong lúc truyền, receiver nhận data/lệnh mà nó không hiểu.
+4. Trong lúc truyền, receiver không thể nhận thêm byte nào nữa.
+5. Controller-receiver phải báo kết thúc transfer cho target-transmitter (NACK byte cuối).
+
+Khi nhận NACK, controller có thể phát **STOP** để hủy transfer, hoặc **repeated START** để bắt đầu transfer mới — STOP không phải lựa chọn duy nhất.
 
 ### 4.4 Hai loại địa chỉ khi lập trình I2C
 
@@ -496,49 +565,106 @@ I2C hardware chỉ hiểu address frame để chọn target. Nó **không tự b
 
 ### 4.5 Bốn kiểu giao dịch phổ biến
 
-Từ hai loại địa chỉ trên, có thể chia API I2C thành 4 kiểu chính:
+Mỗi giao dịch I2C luôn gồm **hai phía đối ứng**: controller đóng một vai trò (transmitter hoặc receiver), target đóng vai trò ngược lại. Từ 2 vai trò × 2 trường hợp (có/không thanh ghi nội bộ) ta có **8 API = 4 cặp đối ứng**:
 
-| Hàm kiểu HAL | Chuỗi truyền trên bus | Ý nghĩa |
-|--------------|-----------------------|---------|
-| `Master_Transmit()` | `Address + W → Data` | Gửi dữ liệu thô tới target |
-| `Master_Receive()` | `Address + R → Data` | Nhận dữ liệu thô từ target |
-| `Mem_Write()` | `Address + W → Register → Data` | Ghi dữ liệu vào thanh ghi nội bộ của target |
-| `Mem_Read()` | `Address + W → Register → Repeated START → Address + R → Data` | Đọc dữ liệu từ thanh ghi nội bộ của target |
+| Cặp | Controller API | Target API | Chuỗi trên bus | Ý nghĩa |
+|-----|----------------|------------|----------------|---------|
+| Truyền | `Master_Transmit()` | `Slave_Receive()` | `Address + W → Data` | Controller gửi data thô cho target |
+| Nhận | `Master_Receive()` | `Slave_Transmit()` | `Address + R → Data` | Controller nhận data thô từ target |
+| Ghi thanh ghi | `Mem_Write()` | `Slave_Mem_Write()` | `Address + W → Register → Data` | Controller ghi vào thanh ghi nội bộ target |
+| Đọc thanh ghi | `Mem_Read()` | `Slave_Mem_Read()` | `Address + W → Register → Repeated START → Address + R → Data` | Controller đọc thanh ghi nội bộ target |
 
-**STM32 giao tiếp STM32:** nếu hai MCU chỉ trao đổi buffer thô, không có bản đồ thanh ghi, dùng `Master_Transmit()` và `Master_Receive()` là đúng. Master chọn đúng target bằng `DEVICE_ADDR`, sau đó data chỉ là buffer do hai firmware tự quy ước.
+> **Ghi chú:** Các hình RM0090 (Figure 241–244) minh họa cả 7-bit và 10-bit addressing. Mục này chỉ phân tích 7-bit (chế độ phổ biến nhất).
+>
+> **Tham chiếu:** Chi tiết triển khai driver (code HAL polling/interrupt, state machine, callback cho cả 8 API) xem ở `i2c_driver.md` mục 5.x.
 
-**STM32 đọc cảm biến/EEPROM/register map:** nếu target có bản đồ thanh ghi, dùng `Mem_Write()` hoặc `Mem_Read()`. Ví dụ đọc register `0x05` cần chuỗi:
+#### 4.5.1 Cặp truyền — Controller gửi ↔ Target nhận
+
+Chuỗi trên bus:
 
 ```
-START
-→ Address + Write
-→ 0x05
-→ REPEATED START
-→ Address + Read
-→ Data
-→ STOP
+S → Address + W → Data1 → Data2 → … → DataN → P
 ```
 
-Kết luận ngắn:
+**Phía controller — transmitter (Figure 243):**
 
-| Nhu cầu | API phù hợp |
-|---------|-------------|
-| Đọc dữ liệu thô từ target | `Master_Receive()` |
-| Đọc thanh ghi cụ thể bên trong target | `Mem_Read()` |
+| Bước | Event | Ý nghĩa |
+|------|-------|---------|
+| 1 | `EV5` | `SB=1`: START đã phát xong. Ghi address + W vào `DR`. |
+| 2 | `EV6` | `ADDR=1`: target đã ACK address. Clear bằng đọc `SR1` rồi `SR2`. |
+| 3 | `EV8_1` | `TxE=1` lần đầu → ghi `Data1` vào `DR`. |
+| 4 | `EV8` | `TxE=1` (lặp lại) → ghi byte kế tiếp vào `DR`. |
+| 5 | `EV8_2` | `BTF=1` (sau byte cuối) → request STOP. |
 
-`Master_Receive()` có thể chọn đúng target bằng `DEVICE_ADDR`, nhưng **không tự chọn được thanh ghi bên trong target**. Muốn chọn thanh ghi, phải gửi thêm `REG_ADDR` trước phase read, thường bằng Repeated START.
+**Phía target — receiver (Figure 242):**
 
-Các sự kiện EV trong RM0009 như EV5, EV6, EV7, EV8, EV9 chỉ mô tả trạng thái phần cứng I2C. Chúng không quyết định byte data có phải địa chỉ thanh ghi hay không.
+| Bước | Event | Ý nghĩa |
+|------|-------|---------|
+| 1 | — | Chờ address phase. |
+| 2 | `EV1` | `ADDR=1`: nhận đúng địa chỉ mình → ACK. Clear bằng đọc `SR1` rồi `SR2`. |
+| 3 | `EV2` | `RxNE=1` (lần đầu) → đọc `DR` để lấy `Data1`. |
+| 4 | `EV2` | `RxNE=1` (lặp lại) → đọc `DR` cho từng byte. |
+| 5 | `EV4` | `STOPF=1`: controller đã phát STOP → kết thúc phiên nhận. |
 
-![I²C — GHI MỘT BYTE](image/image20.png)
+![Figure 243 — Controller transmitter](image/image31.png)
 
-![I²C — GHI NHIỀU BYTE](image/image21.png)
+![Figure 242 — Target receiver](image/image26.png)
 
-![I²C — ĐỌC MỘT BYTE](image/image22.png)
+#### 4.5.2 Cặp nhận — Controller nhận ↔ Target gửi
 
-![I²C — ĐỌC NHI��U BYTE](image/image23.png)
+Chuỗi trên bus:
 
-![I²C — GHI RỒI ĐỌC TRONG CÙNG TRANSACTION](image/image24.png)
+```
+S → Address + R → Data1 → Data2 → … → DataN (NACK) → P
+```
+
+**Phía controller — receiver (Figure 244):**
+
+| Bước | Event | Ý nghĩa |
+|------|-------|---------|
+| 1 | `EV5` | `SB=1`: START đã phát xong. Ghi address + R vào `DR`. |
+| 2 | `EV6` | `ADDR=1`: target đã ACK address. Clear bằng đọc `SR1` rồi `SR2`. |
+| 3 | `EV7` | `RxNE=1` → đọc `DR` cho từng byte. |
+| 4 | **`EV7_1`** | Ở **byte kế cuối**: set `ACK=0` + request STOP **trước khi** byte cuối được nhận. Controller sẽ tự động **NACK byte N** trên bus rồi phát STOP. |
+| 5 | — | STOP. |
+
+**Phía target — transmitter (Figure 241):**
+
+| Bước | Event | Ý nghĩa |
+|------|-------|---------|
+| 1 | — | Chờ address phase. |
+| 2 | `EV1` | `ADDR=1`: nhận đúng địa chỉ + R → biết mình được chọn để **phát**. Clear bằng đọc `SR1` rồi `SR2`. |
+| 3 | `EV3_1` | `TxE=1` lần đầu → nạp `Data1` vào `DR`. |
+| 4 | `EV3` | `TxE=1` (lặp lại) → nạp byte kế tiếp. |
+| 5 | **`EV3_2`** | `AF=1`: nhận **NACK** từ controller → đây là tín hiệu "controller đã đủ, ngừng phát". Clear bằng ghi 0 vào bit `AF` của `SR1`. |
+
+![Figure 244 — Controller receiver](image/image30.png)
+
+![Figure 241 — Target transmitter](image/image25.png)
+
+#### 4.5.3 Hai quy tắc tổng quan
+
+**Rule 1 — Quyền kết thúc transfer luôn thuộc về controller.**
+
+Dù controller đang gửi hay đang nhận, controller là bên duy nhất quyết định khi nào transfer kết thúc (bằng **STOP** hoặc **Repeated START**). Target không bao giờ tự dừng transfer — target chỉ phản hồi ACK/NACK theo từng byte, và có thể dùng NACK để **báo lỗi** ở chiều controller-gửi (target đang nhận, target NACK khi bận / buffer đầy / không hiểu lệnh → controller phát hiện `AF=1` và tự phát STOP để hủy transfer).
+
+**Rule 2 — Controller-receiver NACK byte cuối để báo target dừng.**
+
+Ở byte kế cuối (`EV7_1`), controller set `ACK=0` và request STOP **trước khi** byte cuối được ACK/NACK trên bus. Lý do: ACK/NACK cho byte N được phát đi ngay sau byte N — không thể nhận xong byte N rồi mới quyết định NACK (lúc đó phần cứng đã tự động ACK rồi). Target-transmitter nhận NACK → `EV3_2` (AF=1) → dừng phát. Nếu controller quên set `ACK=0` đúng lúc, target phát mãi → giao dịch treo, chiếm bus.
+
+#### 4.5.4 Khi nào STM32 đóng vai target
+
+Phần lớn ứng dụng STM32 + IC ngoại vi để STM32 ở role **controller**, IC ngoại vi ở role **target** đơn giản. STM32 chỉ đóng vai target trong các trường hợp:
+
+- **Multi-MCU** — 2 STM32 trên cùng bus I2C, một bên controller, một bên target. Thường gặp khi một MCU chuyên xử lý cảm biến và một MCU chuyên giao tiếp user (UART/LCD).
+- **Debug bridge** — STM32 trung gian giữa PC (qua USB-UART) và IC ngoại vi, mô phỏng một số byte để test firmware controller.
+- **IO expander / Sensor simulation** — STM32 mô phỏng EEPROM (AT24Cxx) hoặc cảm biến để test firmware controller mà không cần IC thật.
+- **Hot-swap firmware** — STM32 target đóng vai bootloader cho STM32 khác, cho phép update firmware qua I2C.
+- **Slave mode đơn giản** — STM32 chỉ cần expose vài byte data cho controller đọc; dùng `Slave_Transmit()` thuần là đủ, không cần `Slave_Mem_*`.
+
+> Code HAL tham khảo: `HAL_I2C_EnableListen_IT()`, `HAL_I2C_SlaveRxCplt()`, `HAL_I2C_SlaveTxCplt()`, `HAL_I2C_ListenCplt()`, `HAL_I2C_ErrorCallback()`. Chi tiết skeleton code cho 4 API target side xem `i2c_driver.md` mục 5.x.
+
+Các sự kiện EV trong RM0090 (EV1–EV9) chỉ mô tả trạng thái phần cứng I2C ở mỗi vai trò. Chúng không quyết định byte data có phải địa chỉ thanh ghi hay không — điều đó do firmware target quy ước.
 
 ![I²C — GHI MỘT BYTE](image/image20.png)
 
@@ -569,32 +695,29 @@ START → [address + R/W] → ACK → [data byte 1] → ACK → ... → [data by
 
 #### a) Vì sao không dùng được toàn bộ 0x00–0x7F
 
-Địa chỉ I²C chuẩn là 7-bit → về mặt lý thuyết có 128 giá trị (0x00–0x7F). Tuy nhiên, spec I²C (UM10204 của NXP) **dành riêng 16 địa chỉ** ở hai đầu dải cho các mục đích đặc biệt của chính giao thức. Nếu gán nhầm các địa chỉ này cho slave thông thường, bus có thể xung đột với các tính năng chuẩn (General Call, 10-bit addressing, Hs-mode...).
+Địa chỉ I²C chuẩn là 7-bit → về mặt lý thuyết có 128 giá trị (0x00–0x7F). Tuy nhiên, spec I²C (UM10204 §3.1.12 của NXP) **dành riêng hai nhóm 8 địa chỉ** (`0000 XXX` và `1111 XXX`) cho các mục đích đặc biệt của chính giao thức. Nếu gán nhầm các địa chỉ này cho target thông thường, bus có thể xung đột với các tính năng chuẩn (General Call, 10-bit addressing, Hs-mode, Device ID...).
 
-Hai vùng bị dành riêng:
+Bảng reserved addresses theo **UM10204 Table 4** (lưu ý: ý nghĩa phụ thuộc cả **bit R/W**, nên bảng dùng mẫu 7-bit + R/W thay vì chỉ địa chỉ):
 
-- **0x00–0x07** (0000 0xx – 0000 1xx)
-- **0x78–0x7F** (1111 0xx – 1111 1xx)
-
-Bảng chi tiết từng địa chỉ:
-
-| Địa chỉ 7-bit | Mẫu nhị phân | Mục đích                                    |
-|---------------|--------------|---------------------------------------------|
-| 0x00          | 0000 000     | General Call hoặc START byte                |
-| 0x01          | 0000 001     | Địa chỉ CBUS                                |
-| 0x02          | 0000 010     | Dành cho bus format khác                    |
-| 0x03          | 0000 011     | Dành cho tương lai                          |
-| 0x04–0x07     | 0000 1xx     | Hs-mode master code                         |
-| 0x78–0x7B     | 1111 0xx     | Tiền tố địa chỉ I²C 10-bit                  |
-| 0x7C–0x7F     | 1111 1xx     | Dành cho tương lai                          |
+| Mẫu 7-bit | R/W bit | Mục đích |
+|-----------|---------|----------|
+| 0000 000  | 0       | General Call address |
+| 0000 000  | 1       | START byte (không thiết bị nào được phép ACK byte này) |
+| 0000 001  | X       | CBUS address (cho hệ thống trộn CBUS/I²C; thiết bị I²C không được đáp ứng) |
+| 0000 010  | X       | Reserved cho bus format khác |
+| 0000 011  | X       | Reserved cho mục đích tương lai |
+| 0000 1XX  | X       | Hs-mode Controller code |
+| 1111 1XX  | 1       | **Device ID** |
+| 1111 0XX  | X       | Tiền tố địa chỉ 10-bit |
 
 Giải thích nhanh một số mục quan trọng:
 
-- **General Call (0x00)**: cho phép master gửi một lệnh đến *tất cả* slave cùng lúc (broadcast), thay vì từng slave một.
-- **Hs-mode master code (0x04–0x07)**: khi master muốn chuyển bus sang High-speed mode (3.4 Mbit/s), nó phát mã này sau START để báo cho toàn bus chuẩn bị đổi tốc độ. Mỗi master Hs-mode có một mã riêng → 4 địa chỉ dành cho tối đa 8 mã (0000 1000 – 0000 1111).
-- **Tiền tố 10-bit (0x78–0x7B)**: với thiết bị dùng địa chỉ 10-bit, byte đầu tiên mang mẫu `1111 0xx` — 2 bit `xx` là 2 bit cao nhất của địa chỉ 10-bit, 8 bit còn lại nằm ở byte thứ hai. Đây là lý do 7-bit và 10-bit có thể tồn tại trên cùng một bus mà không nhầm lẫn.
+- **General Call (`0000 000` + W)**: cho phép controller gửi lệnh đến *tất cả* target cùng lúc (broadcast), thay vì từng target một. Ý nghĩa cụ thể nằm ở byte thứ hai (xem 5.1-b). Cùng mẫu 7-bit nhưng với R/W=1 thì đó là **START byte** — cơ chế cho MCU không có hardware I2C poll bus bằng phần mềm (§3.1.15), không phải địa chỉ target.
+- **Hs-mode Controller code (`0000 1XX`)**: khi controller muốn chuyển bus sang High-speed mode (3.4 Mbit/s), nó phát mã này sau START ở tốc độ F/S để giành bus và báo cho toàn bus chuẩn bị đổi tốc độ. Lưu ý đây là **mã 8-bit** (`0000 1XXX`, 8 giá trị từ `0000 1000` đến `0000 1111`), mỗi Hs-mode controller có một mã riêng; arbitration luôn kết thúc ngay sau pha truyền Controller code này (xem mục 1).
+- **Tiền tố 10-bit (`1111 0XX`)**: với thiết bị dùng địa chỉ 10-bit, byte đầu tiên mang mẫu `1111 0XX` — 2 bit `XX` là 2 bit cao nhất của địa chỉ 10-bit, 8 bit còn lại nằm ở byte thứ hai (xem 5.3). Đây là lý do 7-bit và 10-bit có thể tồn tại trên cùng một bus mà không nhầm lẫn.
+- **Device ID (`1111 1XX` + R=1)**: cho phép đọc ID 3 byte (12 bit manufacturer + 9 bit part ID + 3 bit die revision) của một target mà không cần biết trước địa chỉ của nó — dùng để nhận diện thiết bị trên bus (§3.1.17). Trình tự: gửi `1111 1000` (W) → gửi địa chỉ target cần nhận diện → repeated START → gửi `1111 1001` (R) → đọc 3 byte ID. Lưu ý: không được phát STOP giữa chừng trình tự này, nếu không target state machine bị reset.
 
-→ Kết luận: vùng địa chỉ **an toàn** để gán cho slave thông thường là **0x08 đến 0x77** (112 địa chỉ khả dụng).
+→ Kết luận: vùng địa chỉ **an toàn** để gán cho target thông thường là **0x08 đến 0x77** (112 địa chỉ khả dụng). Spec cũng ghi rõ: nếu trong một hệ thống cụ thể biết chắc một reserved address không bao giờ được dùng đúng mục đích của nó, system architect có thể dùng nó làm địa chỉ target — nhưng mặc định thì không nên.
 
 #### b) Ví dụ General Call
 
@@ -643,7 +766,7 @@ Ví dụ linh kiện: P82B96, PCA9600, PCA9515...
 
 Chức năng chính:
 
-- **Cách ly điện dung (capacitance isolation)**: spec I²C giới hạn tổng bus capacitance 400 pF. Buffer chia bus thành 2 đoạn, mỗi đoạn chỉ cần thoả 400 pF → tổng hệ thống được gần 800 pF → gắn được nhiều thiết bị hơn hoặc dây dài hơn.
+- **Cách ly điện dung (capacitance isolation)**: spec I²C giới hạn tổng bus capacitance (400 pF cho Sm/Fm, 550 pF cho Fm+). Buffer chia bus thành 2 đoạn, mỗi đoạn chỉ cần thoả giới hạn riêng → tổng hệ thống gần gấp đôi → gắn được nhiều thiết bị hơn hoặc dây dài hơn.
 - **Mỗi phía có pull-up riêng**: điện trở pull-up được tính độc lập theo capacitance của từng đoạn (xem lại mục 3.5).
 - **Chuyển mức điện áp (level shifting)**: một số buffer cho phép Bus A chạy 3.3V, Bus B chạy 5V.
 - **Tăng khả năng drive**: buffer lái dòng mạnh hơn chân IO của MCU → kéo dài cáp (P82B96 có thể đi cáp dài hàng mét).
@@ -670,7 +793,7 @@ buffer ngừng kéo SDA_B
 
 Chiều ngược lại (B → A) hoạt động tương tự. Vì bản chất open-drain của I²C là "ai kéo LOW cũng được, không ai kéo thì HIGH", nên buffer chỉ cần lan truyền trạng thái LOW qua lại là đủ.
 
-> ⚠️ Vấn đề kỹ thuật thực tế của buffer là **chống latch-up/vòng lặp**: nếu A kéo B xuống LOW, rồi B thấy LOW lại kéo A xuống → hai bên giữ nhau ở LOW mãi. Các IC buffer thật giải quyết bằng cách dùng **hai ngưỡng điện áp khác nhau** (phân biệt "LOW do bên mình kéo" và "LOW do bên kia kéo") hoặc cơ chế offset điện áp — chi tiết này thuộc thiết kế bên trong IC, ngườ dùng chỉ cần biết khi chọn linh kiện.
+> ⚠️ Vấn đề kỹ thuật thực tế của buffer là **chống latch-up/vòng lặp**: nếu A kéo B xuống LOW, rồi B thấy LOW lại kéo A xuống → hai bên giữ nhau ở LOW mãi. Các IC buffer thật giải quyết bằng cách dùng **hai ngưỡng điện áp khác nhau** (phân biệt "LOW do bên mình kéo" và "LOW do bên kia kéo") hoặc cơ chế offset điện áp — chi tiết này thuộc thiết kế bên trong IC, người dùng chỉ cần biết khi chọn linh kiện.
 
 #### c) Buffer phải bảo toàn tính chất I²C
 
@@ -704,7 +827,7 @@ Master ── Bus A ── [ Buffer ] ── Bus B ── Sensor 0x68
       └────────────────────────── Sensor 0x68 (cùng bus A)
 ```
 
-Khi master gửi address 0x68, buffer truyền trong suốt sang Bus B → **cả hai sensor cùng ACK, cùng trả data đồng thồi** → data trên bus bị trộn lẫn (wired-AND) → **xung đột địa chỉ**.
+Khi master gửi address 0x68, buffer truyền trong suốt sang Bus B → **cả hai sensor cùng ACK, cùng trả data đồng thời** → data trên bus bị trộn lẫn (wired-AND) → **xung đột địa chỉ**.
 
 #### f) Giải pháp: I²C multiplexer/switch
 
@@ -737,7 +860,42 @@ Cách dùng:
 
 ---
 
+### 5.3 10-bit addressing
+
+10-bit addressing mở rộng không gian địa chỉ; thiết bị 7-bit và 10-bit có thể nằm **cùng một bus**, và 10-bit dùng được ở mọi tốc độ (hiện ít phổ biến). Theo UM10204 §3.1.11:
+
+- Địa chỉ 10-bit được tạo từ **2 byte đầu tiên** sau START (hoặc repeated START):
+  - Byte 1: 7 bit đầu là `1111 0XX` (XX = 2 bit MSB của địa chỉ 10-bit) + bit R/W.
+  - Byte 2: 8 bit còn lại của địa chỉ.
+- **Write**: controller gửi cả 2 byte address rồi gửi data; target khớp cả 2 byte mới ACK (A1 có thể có nhiều target khớp mẫu `1111 0XX`, chỉ 1 target khớp byte thứ hai).
+
+```
+S | 1111 0XX + W | A1 | XXXX XXXX (8 bit thấp) | A2 | DATA ... | P
+```
+
+- **Read**: giống write đến hết A2, sau đó **repeated START** rồi gửi lại byte 1 với R/W=1 (`1111 0XX + R`); target đã được address trước đó nhận ra mình và chuyển sang transmitter mode (A3).
+
+```
+S | 1111 0XX + W | A1 | XXXX XXXX | A2 | Sr | 1111 0XX + R | A3 | DATA | A | ... | P
+```
+
+- Target 10-bit cũng phản ứng General Call như target 7-bit; START byte có thể đứng trước 10-bit addressing giống như với 7-bit.
+
+---
+
+### 5.4 Bus clear (phục hồi bus bị kẹt)
+
+Theo UM10204 §3.1.16, khi bus bị kẹt (thường do target chết/treo giữ đường LOW):
+
+- **SCL kẹt LOW**: ưu tiên dùng chân HW reset của các thiết bị I²C (nếu có); nếu không có, **cycle power** để kích hoạt mạch Power-On Reset bắt buộc bên trong thiết bị.
+- **SDA kẹt LOW**: controller phát **9 xung clock** trên SCL — thiết bị đang giữ bus LOW phải nhả trong vòng 9 xung đó. Nếu vẫn không nhả → dùng HW reset hoặc cycle power.
+
+Đây là bước nên có trong driver thực tế: nếu transaction bị timeout (vd chờ ACK hoặc chờ flag không bao giờ set), thử bus clear bằng 9 clock pulse trước khi kết luận phần cứng hỏng.
+
+---
+
 ## 6. Tài liệu tham khảo
 
+- **NXP UM10204 Rev. 7.0** (1 October 2021) – *I²C-bus specification and user manual* — chuẩn giao thức I²C chính thức; tài liệu này đối chiếu theo §3.1.1–§3.1.17, §5.3 (Hs-mode), Table 4 (reserved addresses), Table 11 (bus timing), §7.1 (pull-up sizing), §7.2 (vượt bus capacitance). Link gốc NXP: https://www.nxp.com/docs/en/user-guide/UM10204.pdf
 - [TI SBAA565 – A Basic Guide to I2C](https://www.ti.com/lit/an/sbaa565/sbaa565.pdf) — Application note của Texas Instruments, tổng quan I2C (physical layer, protocol, examples, advanced topics).
-- **ST RM0009** – *STM32F405/415, F407/417 Reference Manual*, chương I2C — mô tả thanh ghi `I2C_CR1/CR2`, `I2C_OAR1/OAR2`, `I2C_DR`, `I2C_SR1/SR2`, `I2C_CCR`, `I2C_TRISE` và timing calc cho Sm/Fm/Fm+.
+- **ST RM0090** – *STM32F405/415, F407/417 Reference Manual*, chương I2C — mô tả thanh ghi `I2C_CR1/CR2`, `I2C_OAR1/OAR2`, `I2C_DR`, `I2C_SR1/SR2`, `I2C_CCR`, `I2C_TRISE` và timing calc cho Sm/Fm/Fm+.
