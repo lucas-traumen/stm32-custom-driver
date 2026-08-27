@@ -633,6 +633,10 @@ START → Address+R/W=1 → ADDR=1 → POS=0 → ACK=0
   → clear ADDR → STOP → chờ RXNE → đọc DR
 ```
 
+> **Cơ chế:** với `POS=0`, việc set `ACK=0` được áp dụng cho byte hiện tại đang
+> được nhận vào shift register. Sau khi clear ADDR, byte đầu tiên chính là byte
+> hiện tại nên nó được **NACK**.
+
 **Trường hợp Len = 2:**
 
 Theo RM0090, phải set `ACK=0` và `POS=1` khi `ADDR` còn set. Sau khi clear
@@ -644,6 +648,12 @@ START → Address+R/W=1 → ADDR=1 → ACK=0 → POS=1 → clear ADDR
   → chờ BTF → STOP → đọc DR byte 1 → đọc DR byte 2
   → POS=0 → restore ACK
 ```
+
+> **Cơ chế:** với `POS=1`, hiệu lực của `ACK=0` được **dịch sang byte kế tiếp**
+> — vì vậy byte thứ nhất được ACK, byte thứ hai được NACK. CPU cố tình **không
+> đọc `DR` sau byte thứ nhất**, nên khi byte thứ hai hoàn tất, DATA1 nằm trong
+> `DR` và DATA2 nằm trong shift register → `BTF=1`. Sau STOP, đọc `DR` lần một
+> lấy DATA1 và cho DATA2 chuyển xuống `DR`, rồi đọc `DR` lần hai lấy DATA2.
 
 **Trường hợp Len > 2 (đọc nhiều byte):**
 

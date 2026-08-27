@@ -108,8 +108,9 @@ SPI_ChipSelect(&hspi1, DISABLE);             // CS = HIGH (bỏ chọn)
 | `SPI_GetFlagStatus`      | Kiểm tra flag trong SR (TXE, RXNE, BSY)              |
 | `SPI_Transmit_IT`        | Non-blocking send (interrupt-mode), gọi callback khi xong |
 | `SPI_Receive_IT`         | Non-blocking receive (interrupt-mode), gọi callback khi xong |
+| `SPI_TransmitReceive_IT` | Non-blocking command + read, tự quản CS và gọi callback khi xong |
 | `SPI_IRQHandling`        | Xử lý ngắt, gọi từ `SPIx_IRQHandler` trong it.c      |
-| `SPI_RegisterCallback`   | Đăng ký callback cho sự kiện TX/RX_CMPLT, OVR_ERR    |
+| `SPI_RegisterCallback`   | Đăng ký callback cho sự kiện TX/RX/TXRX complete và OVR_ERR    |
 | `MX_SPI_Init`            | `__weak` — init mặc định (SPI1 mode3, /128, CS=PE3); app override |
 
 ## Lưu ý quan trọng
@@ -118,7 +119,7 @@ SPI_ChipSelect(&hspi1, DISABLE);             // CS = HIGH (bỏ chọn)
 - **Phải bật SPE sau khi config xong**: Không ghi CR1 khi SPE=1.
 - **SendData chờ BSY=0 cuối cùng**: Đảm bảo transfer hoàn tất trước khi tắt SPI.
 - **Receive gửi dummy 0xFF**: Master phải tạo clock bằng cách ghi DR, dù không cần truyền gì.
-- **Truy cập DR bằng word (32-bit)**: Driver ghi/đọc `pSPIx->DR` trực tiếp (không dùng con trỏ `uint8_t*`). Truy cập byte (STRB/LDRB) vào DR trên STM32F4 có thể không clear RXNE đúng → OVR ngầm, đọc ra dữ liệu cũ.
+- **Truy cập DR theo kích thước frame**: Driver dùng truy cập 8-bit khi `DFF=0` và 16-bit khi `DFF=1` thông qua helper `SPI_WriteDR8/16()` và `SPI_ReadDR8/16()`. Không tự ý đổi kích thước truy cập vì việc đọc `DR` phải phù hợp với frame format và cơ chế clear `RXNE`.
 
 ## Vấn đề chip-select (CS) và ODR reset — BẪY THƯỜNG GẶP
 
@@ -142,14 +143,15 @@ Nếu `CS_Port = NULL` → driver không quản CS (dùng hardware NSS hoặc ap
 
 ## Interrupt mode (non-blocking)
 
-Mô hình theo đúng pattern EXTI: bảng callback + trap mặc định. Ứng dụng chỉ **kích hoạt** ở main.c; xử lý ngắt nằm trong `stm32f4xx_it.c`.
+Mô hình gồm bảng callback mặc định dạng no-op. Ứng dụng đăng ký callback ở main.c; xử lý ngắt nằm trong `stm32f4xx_it.c`.
 
 ```c
-// 1. Đăng ký callback (nếu không, sự kiện rơi vào trap while(1) để debugger bắt)
+// 1. Đăng ký callback. Nếu không đăng ký, callback mặc định không thực hiện gì.
 void SPI1_AppCallback(SPI_Handle_t *h, uint8_t evt) {
     if (evt == SPI_EVENT_TX_CMPLT) { /* ... */ }
     if (evt == SPI_EVENT_RX_CMPLT) { /* ... */ }
-    if (evt == SPI_EVENT_OVR_ERR)  { /* ... */ }
+    if (evt == SPI_EVENT_TXRX_CMPLT) { /* ... */ }
+    if (evt == SPI_EVENT_OVR_ERR)    { /* ... */ }
 }
 SPI_RegisterCallback(SPI1, SPI1_AppCallback);
 
@@ -170,6 +172,7 @@ SPI_Receive_IT(&hspi1, rxbuf, len);    // ISR đọc dần, xong → callback RX
 |----------------------|----------------------------------|
 | `SPI_EVENT_TX_CMPLT` | Truyền xong toàn bộ `TxLen` byte |
 | `SPI_EVENT_RX_CMPLT` | Nhận xong toàn bộ `RxLen` byte   |
+| `SPI_EVENT_TXRX_CMPLT` | Hoàn tất command + read transaction |
 | `SPI_EVENT_OVR_ERR`  | Overrun (chỉ khi ERRIE bật)      |
 
 ## Debug tips
