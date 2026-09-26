@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bài 1 — Phương pháp: từ RM0090 đến một driver</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<p class="meta"><span class="num">BÀI 1</span> · Driver bare-metal STM32F407 · kết nối với <a href="MISSION.md">MISSION.md</a></p>
+
+<h1>Phương pháp: biến một chương của RM0090 thành driver của riêng bạn</h1>
+
+<p class="meta">Thời lượng ~15 phút · Nguồn chính nên đọc sau: <a href="https://www.st.com/resource/en/reference_manual/dm00031020-stm32f405-415-stm32f407-417-stm32f427-437-and-stm32f429-439-advanced-arm-based-32-bit-mcus-stmicroelectronics.pdf" target="_blank">RM0090, chương 6 (GPIO)</a></p>
+
+<h2>Vì sao bài này quan trọng</h2>
+<p>Mission của bạn không phải là "có một driver GPIO chạy" — bạn đã có rồi. Mission là: <strong>đọc datasheet và tự viết driver cho <em>bất kỳ</em> ngoại vi</strong> (Timer, DMA, CAN...). Bài này dạy cái <em>phương pháp</em>: một quy trình 5 bước lặp lại được, dùng GPIO làm ví dụ vì bạn đã quen nó. Học được quy trình này, mỗi ngoại vi mới chỉ là thay thế tên register.</p>
+
+<h2>Bước 1 — Đọc danh sách register từ RM0090</h2>
+<p>Mỗi chương ngoại vi trong RM0090 có một bảng "<em>register map</em>" (VD chương 6, mục 6.4). Nó liệt kê từng register, địa chỉ offset, tên đầy đủ và mô tả. Với GPIO:</p>
+<table>
+<tr><th>Offset</th><th>Tên</th><th>Chức năng</th></tr>
+<tr><td>0x00</td><td><code>MODER</code></td><td>Chọn chế độ từng pin (in/out/AF/analog)</td></tr>
+<tr><td>0x04</td><td><code>OTYPER</code></td><td>Output type: push-pull / open-drain</td></tr>
+<tr><td>0x08</td><td><code>OSPEEDR</code></td><td>Tốc độ output</td></tr>
+<tr><td>0x0C</td><td><code>PUPDR</code></td><td>Pull-up / pull-down</td></tr>
+<tr><td>0x10</td><td><code>IDR</code></td><td>Input data (đọc mức pin)</td></tr>
+<tr><td>0x14</td><td><code>ODR</code></td><td>Output data (ghi mức pin)</td></tr>
+<tr><td>0x18</td><td><code>BSRR</code></td><td>Set/reset từng bit (ghi atomic)</td></tr>
+<tr><td>0x20</td><td><code>AFRL</code>/<code>AFRH</code></td><td>Chọn chức năng thay thế AF0–AF15</td></tr>
+</table>
+<p>Trong code của bạn, struct <code>GPIO_TypeDef</code> trong <code>stm32f407xx.h</code> chính là bảng này dưới dạng C — mỗi thành viên khớp một offset. Đó là lý do bạn viết <code>pGPIOx-&gt;BSRR</code> thay vì <code>*(volatile uint32_t*)(GPIOA_BASE + 0x18)</code>: bản đồ register đã được "đóng gói" sẵn.</p>
+
+<h2>Bước 2 — Tìm vùng "chức năng" bạn cần</h2>
+<p>Đừng đọc cả chương. Mỗi lần viết hàm, chỉ tra đúng vùng bạn cần:</p>
+<ul>
+<li>Cần bật clock cho GPIO → mục <strong>RCC</strong> trong RM0090 (bảng AHB1ENR), trong code của bạn là <code>GPIO_PeriClockControl()</code>.</li>
+<li>Cần cấu hình chân → phần mô tả <code>MODER</code>/<code>PUPDR</code>/<code>OSPEEDR</code>/<code>OTYPER</code>.</li>
+<li>Cần set một chân → mô tả <code>BSRR</code> (set bit 0–15, reset bit 16–31).</li>
+</ul>
+<blockquote>Quy tắc đọc hiệu quả: <strong>tìm mục tiêu trước, đọc sau.</strong> Bảng offset (Bước 1) cho bạn biết register nào tồn tại; mô tả từng register cho bạn biết bit nào làm gì. Bạn không bao giờ cần đọc hết một chương.</blockquote>
+
+<h2>Bước 3 — Chọn cấu trúc dữ liệu (phong cách OOP/HAL)</h2>
+<p>Theo phong cách bạn đang theo: tách thành <strong>config struct</strong> (mô tả "muốn cái gì") và <strong>handle struct</strong> (buộc config vào một ngoại vi cụ thể). Nhìn <code>gpio_driver.h</code> của bạn:</p>
+<pre><code>typedef struct {
+    uint8_t GPIO_PinNumber;
+    uint8_t GPIO_PinMode;
+    uint8_t GPIO_PinSpeed;
+    uint8_t GPIO_PinPuPdControl;
+    uint8_t GPIO_PinOPType;
+    uint8_t GPIO_PinAltFunMode;
+} GPIO_PinConfig_t;         // config: MÔ TẢ
+
+typedef struct {
+    GPIO_TypeDef *pGPIOx;
+    GPIO_PinConfig_t GPIO_PinConfig;
+} GPIO_Handle_t;            // handle: config + ngoại vi cụ thể</code></pre>
+<p>Mẹo để nhớ: mỗi field của config struct tương ứng với <em>một register</em>. 6 field = 6 register (MODER, OTYPER, OSPEEDR, PUPDR, ...). Khi bạn thiết kế config struct cho một ngoại vi mới, hãy tự hỏi: <em>field nào ánh xạ register nào?</em> Nếu có field không ánh xạ register nào, thường là nó không cần thiết.</p>
+
+<h2>Bước 4 — Viết hàm <code>Init</code>: config → ghi register</h2>
+<p>Bước "dịch" config thành lệnh ghi. Logic chung cho mọi ngoại vi:</p>
+<pre><code>void GPIO_Init(GPIO_Handle_t *h) {
+    // 1. clear vùng bit cần cấu hình
+    // 2. shift config field vào vị trí đúng trong register
+    // 3. ghi (|=) vào register
+    h-&gt;pGPIOx-&gt;MODER   |= (h-&gt;GPIO_PinConfig.GPIO_PinMode &lt;&lt; (pin*2));
+    h-&gt;pGPIOx-&gt;OSPEEDR |= (h-&gt;GPIO_PinConfig.GPIO_PinSpeed &lt;&lt; (pin*2));
+    // ...OTYPER, PUPDR...
+}</code></pre>
+<p>Hai phép dịch quen thuộc cần nhớ: mỗi chân chiếm <strong>2 bit</strong> trong MODER/OSPEEDR/PUPDR (nên shift <code>pin*2</code>), và chỉ <strong>1 bit</strong> trong OTYPER. Dịch sai số bit là bug kinh điển — vậy nên phải xác nhận từ RM0090 trước khi dịch.</p>
+
+<h2>Bước 5 — Viết hàm thao tác: đọc/ghi đúng register</h2>
+<p>Các hàm "điều khiển" gần như trực tiếp chạm register. Ví dụ trong driver của bạn:</p>
+<pre><code>void GPIO_Write_Pin(GPIO_Handle_t *h, uint8_t pin, uint8_t val) {
+    if (val == 1) h-&gt;pGPIOx-&gt;BSRR |= (1 &lt;&lt; pin);   // set: dùng BSRR
+    else          h-&gt;pGPIOx-&gt;BSRR |= (1 &lt;&lt; (pin + 16)); // reset: bit 16-31
+}
+uint8_t GPIO_Read_Pin(GPIO_Handle_t *h, uint8_t pin) {
+    return (h-&gt;pGPIOx-&gt;IDR &gt;&gt; pin) &amp; 1;            // đọc: dùng IDR
+}</code></pre>
+<p>Lưu ý tinh tế: ghi output dùng <code>BSRR</code> chứ <em>không</em> phải <code>ODR</code>. Vì sao? Vì <code>BSRR</code> ghi atomic từng bit — không bị lỗi "read-modify-write race" khi đang đọc <code>ODR</code> thì bị ngắt. Đây chính là loại chi tiết bạn chỉ học được khi <em>đọc chú thích trong RM0090</em>, không phải khi copy-paste. (Bạn đã sửa bug này — xem ghi chú trong <code>document/driver</code>.)</p>
+
+<div class="box"><strong>Phương pháp 5 bước tóm tắt:</strong> (1) đọc bảng register map → (2) chỉ tra vùng chức năng cần → (3) thiết kế config/handle struct sao cho field ánh xạ register → (4) viết Init = dịch config thành ghi register → (5) viết hàm thao tác = đọc/ghi đúng register (nhớ BSRR vs ODR, IDR cho input).</div>
+
+<h2>Áp dụng cho ngoại vi tiếp theo</h2>
+<p>Khi bạn viết driver <strong>Timer</strong> hoặc <strong>DMA</strong>, hãy tự đi qua đúng 5 bước này và <em>nói ra thành tiếng</em> cho mình nghe từng bước. Đó là bài tập luyện. Nếu kẹt ở một register, chỉ mở đúng mô tả register đó trong RM0090.</p>
+
+<h2>Trắc nghiệm nhanh (bấm thử)</h2>
+<div class="quiz">
+  <div class="q">Để set chân PA5 lên mức cao, ghi vào register nào?</div>
+  <button class="opt" data-correct>BSRR, bit 5</button>
+  <button class="opt">ODR, dịch trái 5</button>
+  <button class="opt">MODER, bit 5</button>
+  <button class="opt">IDR, bit 5</button>
+  <div class="feedback" data-good="BSRR set bit 5 — ghi atomic, tránh race khi đọc/ghi ODR."></div>
+</div>
+
+<div class="quiz">
+  <div class="q">Trong MODER, mỗi chân chiếm bao nhiêu bit?</div>
+  <button class="opt">1 bit</button>
+  <button class="opt" data-correct>2 bit</button>
+  <button class="opt">4 bit</button>
+  <button class="opt">8 bit</button>
+  <div class="feedback" data-good="MODER/OSPEEDR/PUPDR mỗi chân 2 bit — nên shift pin*2."></div>
+</div>
+
+<div class="quiz">
+  <div class="q">Đọc mức hiện tại của một chân (input) dùng register nào?</div>
+  <button class="opt">ODR</button>
+  <button class="opt">BSRR</button>
+  <button class="opt" data-correct>IDR</button>
+  <button class="opt">PUPDR</button>
+  <div class="feedback" data-good="IDR = input data register, phản ánh mức điện áp thực tế ở chân."></div>
+</div>
+
+<h2>Để nhớ lâu</h2>
+<ul>
+<li><strong>Nhớ lại</strong>: đóng trang này, tự viết lại 5 bước trên giấy. Nếu quên bước nào, lật lại — việc cố nhớ chính là lúc não bạn xây "storage strength".</li>
+<li><strong>Spacing</strong>: trước bài sau, hãy tự nhắc lại bản đồ register GPIO (8 register, offset & chức năng) mà không mở lại.</li>
+<li><strong>Primary source</strong>: đọc RM0090 chương 6 (GPIO) — bạn sẽ thấy mọi thứ ở trên nằm nguyên trong datasheet.</li>
+</ul>
+
+<p class="foot">Còn gì chưa rõ? Hỏi mình (agent) — mình là giáo viên của bạn và sẽ giải thích thêm về bất kỳ register hay bước nào. · Tài liệu liên quan: <a href="../reference/gpio-register-map.html">Glossary/Reference — bản đồ register GPIO</a> (sẽ tạo ở bài sau).</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

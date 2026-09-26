@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reference — Bản đồ register GPIO (STM32F407)</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<p class="meta"><span class="num">REFERENCE</span> · GPIO · nguồn: RM0090 chương 6 · khớp với <code>GPIO_TypeDef</code> trong <code>stm32f407xx.h</code></p>
+
+<h1>Bản đồ register GPIO (STM32F407)</h1>
+
+<p>Đây là "cheat sheet" để tra nhanh khi viết/dịch driver GPIO. Các ngoại vi khác cũng có cùng cấu trúc: một bảng offset, mỗi register một mô tả bit.</p>
+
+<h2>6 register bạn cần hầu hết thời gian</h2>
+<table>
+<tr><th>Offset</th><th>Tên</th><th>Bits/pin</th><th>Chức năng</th><th>Ghi chú driver</th></tr>
+<tr><td>0x00</td><td><code>MODER</code></td><td>2</td><td>Chế độ: 00=In, 01=Out, 10=AF, 11=Analog</td><td>shift <code>pin*2</code></td></tr>
+<tr><td>0x04</td><td><code>OTYPER</code></td><td>1</td><td>0=push-pull, 1=open-drain</td><td>shift <code>pin</code></td></tr>
+<tr><td>0x08</td><td><code>OSPEEDR</code></td><td>2</td><td>0=low, 1=medium, 2=fast, 3=high</td><td>shift <code>pin*2</code></td></tr>
+<tr><td>0x0C</td><td><code>PUPDR</code></td><td>2</td><td>0=no, 1=pull-up, 2=pull-down</td><td>shift <code>pin*2</code></td></tr>
+<tr><td>0x10</td><td><code>IDR</code></td><td>1</td><td>Input data — mức thực tế ở chân</td><td>đọc: <code>(IDR&gt;&gt;pin)&amp;1</code></td></tr>
+<tr><td>0x14</td><td><code>ODR</code></td><td>1</td><td>Output data — mức muốn ghi ra</td><td>KHÔNG dùng cho set 1 chân (xem BSRR)</td></tr>
+<tr><td>0x18</td><td><code>BSRR</code></td><td>—</td><td>Bit 0–15: set; bit 16–31: reset. Ghi atomic.</td><td>set: <code>1&lt;&lt;pin</code>; reset: <code>1&lt;&lt;(pin+16)</code></td></tr>
+<tr><td>0x1C</td><td><code>LCKR</code></td><td>1</td><td>Khóa cấu hình pin</td><td>ít dùng</td></tr>
+<tr><td>0x20</td><td><code>AFRL</code></td><td>4</td><td>AF cho pin 0–7</td><td>nibble <code>pin*4</code></td></tr>
+<tr><td>0x24</td><td><code>AFRH</code></td><td>4</td><td>AF cho pin 8–15</td><td>nibble <code>(pin-8)*4</code></td></tr>
+</table>
+
+<h2>Bẫy kinh điển</h2>
+<ul>
+<li><strong>BSRR vs ODR</strong>: ghi 1 chân dùng <code>BSRR</code> (atomic, không bị ngắt chen giữa read-modify-write). Ghi <code>ODR</code> với <code>|=</code> trên 1 chân dễ race.</li>
+<li><strong>MODER reset = 0xFFFFFFFF</strong>: sau reset toàn bộ chân ở chế độ input (00), vì vậy đọc an toàn, nhưng nếu muốn out phải clear 2 bit đó trước khi set.</li>
+<li><strong>AF cần clock & chọn AF đúng</strong>: bật clock GPIO qua RCC (AHB1ENR) + cấu hình AFRL/AFRH theo bảng AF trong datasheet.</li>
+<li><strong>Bật clock trước khi dùng</strong>: mọi ngoại vi F4 cần bật clock ở RCC, nếu không đọc/ghi register sẽ "chết lặng" (bus fault hoặc không phản hồi).</li>
+</ul>
+
+<h2>Thứ tự khởi tạo chuẩn</h2>
+<pre><code>1. Bật clock GPIO:  RCC-&gt;AHB1ENR |= (1 &lt;&lt; port_index)   // GPIOA=0, B=1, C=2...
+2. MODER  = chế độ (in/out/AF/analog)
+3. OTYPER = output type
+4. OSPEEDR = tốc độ
+5. PUPDR  = pull-up/down
+6. (nếu AF) AFRL/AFRH = chọn AF
+7. Dùng:  BSRR để set/reset, IDR để đọc</code></pre>
+
+<p class="foot">Liên quan: <a href="../lessons/0001-datasheet-to-driver-method.html">Bài 1 — phương pháp từ datasheet đến driver</a> · Code thật: <code>Driver/Core/Src/gpio_driver.c</code></p>
+</body>
+</html>
